@@ -1,6 +1,6 @@
 # SQL-Proctor Architecture
 
-> Status: Current for the development environment built on 2026-11-19. Product features are not implemented.
+> Status: Current for the development environment and agent engineering layer built on 2026-11-19. Product features are not implemented.
 
 SQL-Proctor is a web-based SQL practical examination system. This document describes the components, the runtime topology, and the boundaries between them. It records what exists. Planned behavior is marked `TBD` or `Proposed`.
 
@@ -14,6 +14,21 @@ SQL-Proctor is a web-based SQL practical examination system. This document descr
 | Execution database | MariaDB 11.8.9 | `infra/compose.yaml`, service `mariadb` | Runs student SQL queries. Never stores application data. |
 | Infrastructure | Docker Compose | `infra/` | Starts and manages the two databases. Holds no application code. |
 | Local evidence | Markdown | `.agent-runtime/` | Development run records. Gitignored and never committed. |
+| Agent engineering | Markdown skills, `AGENTS.md`, `skills-lock.json` | `.agents/skills/`, project root | Development guidance for the coding agent. No runtime role. |
+
+## Agent engineering layer
+
+The agent engineering layer is development guidance. It is not imported by either application and it does not change a runtime boundary.
+
+| Item | Location | Role |
+|---|---|---|
+| Project rules | `AGENTS.md` | Always-loaded rules, architecture boundaries, workflows, and the skill-loading map |
+| Project skills | `.agents/skills/<id>/SKILL.md` | Installed and custom skills, loaded by the coding agent when a task needs them |
+| Skill lock | `skills-lock.json` | Source, commit, path, hash, and install mode for each external skill |
+| Inventory | `docs/agent-engineering.md` | Sources, capability matrix, rejected candidates, compatibility, maintenance |
+| Templates and records | `docs/templates/`, `docs/specs/`, `docs/adr/` | Specifications, plans, test matrices, reviews, and decisions |
+
+The SQL execution isolation skill is the security gate for the MariaDB execution feature. It does not run SQL; it forces the design, privilege, limit, cleanup, and verification decisions before that feature is built.
 
 ## Runtime topology
 
@@ -83,6 +98,7 @@ Every `.env` file is gitignored. `.env.example` files contain placeholders only.
 4. The frontend never connects to a database directly. It calls the API.
 5. The applications are not containerized at this stage. A later task can add them and the Human Owner approves it.
 6. No service exists beyond PostgreSQL and MariaDB. Redis, queues, and mail services are added only when a feature requires them.
+7. Agent skills and engineering documents are development guidance. They are not bundled into the Next.js or Laravel applications and do not change a runtime boundary.
 
 ## Authentication
 

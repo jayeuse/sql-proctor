@@ -11,7 +11,20 @@ A web-based SQL practical examination system. This repository currently contains
 | Application database | PostgreSQL 17.12 |
 | Student query execution | MariaDB 11.8.9 |
 | Infrastructure | Docker 29.8.0, Docker Compose 5.5.1 |
-| Tests | PHPUnit (backend). Vitest is planned for the frontend and is not installed. |
+| Tests | PHPUnit 12.5.44 (backend; `^12.5.12` constraint). Pest 4 is compatible and not installed. Vitest, React Testing Library, and Playwright are planned and not installed. |
+
+## Agent engineering
+
+The project uses a discovery-first agent engineering standard. The root [AGENTS.md](AGENTS.md) is always loaded and holds the project rules and the skill-loading map. The detailed skills live in `.agents/skills/`; `skills-lock.json` pins the 12 skills installed from external sources. Four project-specific skills cover negative-first testing, SQL execution isolation, integration testing, and frontend testing.
+
+The standard requires Specification-Driven Development, Test-Driven Development, negative-first test design, security review, code review, and evidence-based completion. The inventory, sources, rejected candidates, version compatibility, and maintenance commands are in [docs/agent-engineering.md](docs/agent-engineering.md).
+
+```sh
+npx skills list --json     # show the installed project skills
+npx skills update          # update external skills; review the diff first
+```
+
+No application dependency was installed by this setup. Tailwind CSS, Pest, Vitest, React Testing Library, and Playwright are installed by the first task that needs them.
 
 ## Directory structure
 
@@ -30,7 +43,13 @@ sql-proctor/
 │   ├── architecture.md
 │   ├── database-design.md
 │   ├── api-specification.md
-│   └── development-roadmap.md
+│   ├── development-roadmap.md
+│   ├── agent-engineering.md
+│   ├── specs/                    Specifications (SPEC-0001 ...)
+│   ├── templates/                Specification, plan, test, TDD, review, DoD, styling
+│   └── adr/                      Architecture decisions (ADR-0001 ...)
+├── .agents/skills/               Installed and custom agent skills
+├── skills-lock.json              Pinned external skill sources
 ├── .agent-runtime/               Local run records (gitignored)
 ├── .gitignore
 └── README.md
@@ -144,8 +163,13 @@ Caution: `docker compose down -v` deletes both database volumes and their data.
 
 ## Documentation
 
+- [AGENTS.md](AGENTS.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/database-design.md](docs/database-design.md)
 - [docs/api-specification.md](docs/api-specification.md)
 - [docs/development-roadmap.md](docs/development-roadmap.md)
+- [docs/agent-engineering.md](docs/agent-engineering.md)
+- [docs/specs/README.md](docs/specs/README.md)
+- [docs/templates/specification.md](docs/templates/specification.md)
+- [docs/adr/README.md](docs/adr/README.md)
 - [infra/README.md](infra/README.md)
