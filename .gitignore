@@ -1,0 +1,9 @@
+.agent-runtime/
+
+# OS metadata
+.DS_Store
+
+# Local secrets — never commit
+infra/.env
+backend/sql-proctor-api/.env
+frontend/sql-proctor-ui/.env.local
