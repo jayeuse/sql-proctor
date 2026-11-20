@@ -1,0 +1,102 @@
+{
+  "version": 2,
+  "skills": {
+    "api-design-patterns": {
+      "source": "AsyrafHussin/agent-skills",
+      "commit": "1aa0ff717c10309226c9e678f00873976450fd76",
+      "sourceType": "github",
+      "skillPath": "skills/api-design-patterns/SKILL.md",
+      "computedHash": "3df3206710c44366278c2d1307204d2d1e15be0a06d57dce1cda2b42ed43fd17",
+      "installMode": "copy"
+    },
+    "e2e-playwright-testing": {
+      "source": "AsyrafHussin/agent-skills",
+      "commit": "1aa0ff717c10309226c9e678f00873976450fd76",
+      "sourceType": "github",
+      "skillPath": "skills/e2e-playwright-testing/SKILL.md",
+      "computedHash": "a7e569dd64cf400bc6c9d9ede36cc126ef1120ecc1b4bf713ae52c61f5d3cb85",
+      "installMode": "copy"
+    },
+    "laravel-best-practices": {
+      "source": "laravel/boost",
+      "commit": "6004f09e71fe199880a671df6dc34a6e731ba1ea",
+      "sourceType": "github",
+      "skillPath": ".ai/laravel/skill/laravel-best-practices/SKILL.md",
+      "computedHash": "a92d7c727eaa27cb5153af54203ff6dbf283bf4b6b31aad6f6a12517b471a306",
+      "installMode": "copy"
+    },
+    "laravel-owasp-security": {
+      "source": "AsyrafHussin/agent-skills",
+      "commit": "1aa0ff717c10309226c9e678f00873976450fd76",
+      "sourceType": "github",
+      "skillPath": "skills/laravel-owasp-security/SKILL.md",
+      "computedHash": "de2c77b73a09359c19ddcd2db6961659eb6033a1bca84313ecdff63e200fb0f2",
+      "installMode": "copy"
+    },
+    "laravel-testing": {
+      "source": "AsyrafHussin/agent-skills",
+      "commit": "1aa0ff717c10309226c9e678f00873976450fd76",
+      "sourceType": "github",
+      "skillPath": "skills/laravel-testing/SKILL.md",
+      "computedHash": "8c5c022c5ebf7f6554a2d12ad4570d1b3fe212736d1903ec491fb8c3967914f5",
+      "installMode": "copy"
+    },
+    "mariadb-features": {
+      "source": "MariaDB/skills",
+      "commit": "5895ef8da1908d5b438d8ccb48653bcecedc090a",
+      "sourceType": "github",
+      "skillPath": "mariadb-features/SKILL.md",
+      "computedHash": "994dd440f0f52dd8610b365395691fa1c5cbd37e4266bc93e99b91fd7a56a2c6",
+      "installMode": "copy"
+    },
+    "mariadb-query-optimization": {
+      "source": "MariaDB/skills",
+      "commit": "5895ef8da1908d5b438d8ccb48653bcecedc090a",
+      "sourceType": "github",
+      "skillPath": "mariadb-query-optimization/SKILL.md",
+      "computedHash": "dc1ebcfe7455bdbcc37e8a2957e9964a7800345882144aee0b223dc48940c5f9",
+      "installMode": "copy"
+    },
+    "mysql-to-mariadb": {
+      "source": "MariaDB/skills",
+      "commit": "5895ef8da1908d5b438d8ccb48653bcecedc090a",
+      "sourceType": "github",
+      "skillPath": "mysql-to-mariadb/SKILL.md",
+      "computedHash": "6daf00148578c10d4bf237aa63443bc0956fa793cfe0c40dba80865982b28670",
+      "installMode": "copy"
+    },
+    "project-docs": {
+      "source": "AsyrafHussin/agent-skills",
+      "commit": "1aa0ff717c10309226c9e678f00873976450fd76",
+      "sourceType": "github",
+      "skillPath": "skills/project-docs/SKILL.md",
+      "computedHash": "da4c3a5273bbda1ee3817d0541b5064e33a7d7374ed68dab0a17b0217de02321",
+      "installMode": "copy"
+    },
+    "runbook-creation": {
+      "source": "BagelHole/DevOps-Security-Agent-Skills",
+      "commit": "0365f57a079b1332f95cf26e31dd2d5332a8399f",
+      "sourceType": "github",
+      "skillPath": "compliance/continuity/runbook-creation/SKILL.md",
+      "computedHash": "43f6de36e3865ee84caf50c9b0f5baf3fd8200a807127145e6d78b4084ceecb5",
+      "installMode": "copy"
+    },
+    "tailwindcss-development": {
+      "source": "laravel/boost",
+      "ref": "main",
+      "commit": "6004f09e71fe199880a671df6dc34a6e731ba1ea",
+      "sourceType": "github",
+      "skillPath": ".ai/tailwindcss/4/skill/tailwindcss-development/SKILL.md",
+      "computedHash": "9362b0a47d4079a5aba5fe8e0deb1e272bec5540a3a45a4b8d2e13892587fa96",
+      "installMode": "copy"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "2782702b2cf69ace085ed30d067b6f8bfd2d777ad51770fc5bdae9cb5c1b5c04",
+      "installMode": "copy"
+    }
+  }
+}
