@@ -193,4 +193,22 @@ class ExceptionRenderingTest extends TestCase
             ->assertHeader('X-Request-Id', 'req_abc-123.45')
             ->assertJsonStructure(['message', 'errors' => ['username']]);
     }
+
+    public function test_5xx_api_exception_is_sanitized_to_fixed_server_error_body(): void
+    {
+        Route::middleware('api')->get('/api/_test/api-5xx', function (): void {
+            throw new ApiException(503, 'SQLSTATE[08006]: internal secret', 'internal_db_err');
+        });
+
+        $response = $this->getJson('/api/_test/api-5xx');
+
+        $response->assertStatus(503)
+            ->assertExactJson(['message' => 'Server error.']);
+
+        $raw = (string) $response->getContent();
+        $this->assertStringNotContainsString('SQLSTATE', $raw);
+        $this->assertStringNotContainsString('internal secret', $raw);
+        $this->assertStringNotContainsString('internal_db_err', $raw);
+        $this->assertMatchesRegularExpression(self::UUID_PATTERN, (string) $response->headers->get('X-Request-Id'));
+    }
 }

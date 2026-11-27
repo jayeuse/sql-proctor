@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Http\Support\ApiResponse;
+use App\Models\User;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
@@ -60,5 +61,21 @@ class ResponseEnvelopeTest extends TestCase
         $noContent = $this->postJson('/api/_test/no-content');
         $noContent->assertNoContent();
         $this->assertSame('', $noContent->getContent());
+    }
+
+    public function test_existing_user_route_returns_resource_data_envelope(): void
+    {
+        $user = User::factory()->make([
+            'id' => 1,
+            'name' => 'Jane Doe',
+            'email' => 'jane@example.com',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/user');
+
+        $response->assertOk()
+            ->assertJsonPath('data.name', 'Jane Doe')
+            ->assertJsonMissingPath('name');
+        $this->assertNotEmpty($response->headers->get('X-Request-Id'));
     }
 }

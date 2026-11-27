@@ -46,9 +46,19 @@ return Application::configure(basePath: dirname(__DIR__))
             );
 
             if ($e instanceof ApiException) {
+                $status = $e->getStatusCode();
+
+                if ($status >= 500) {
+                    return $withRequestId(ApiResponse::error(
+                        'Server error.',
+                        $status,
+                        headers: $e->getHeaders(),
+                    ));
+                }
+
                 return $withRequestId(ApiResponse::error(
                     $e->getMessage(),
-                    $e->getStatusCode(),
+                    $status,
                     $e->errorCode(),
                     $e->getHeaders(),
                 ));
