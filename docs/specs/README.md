@@ -1,6 +1,6 @@
 # Specifications
 
-> Owner: the project's parent session · Status: Active · Updated: 2026-11-19
+> Owner: the project's parent session · Status: Active · Updated: 2026-11-27
 
 This folder holds the specifications for changes that are larger than one task note. Each specification follows [the specification template](../templates/specification.md) and the SDD workflow in [AGENTS.md](../../AGENTS.md).
 
@@ -26,3 +26,4 @@ This folder holds the specifications for changes that are larger than one task n
 | Spec | Title | Status | Date |
 |---|---|---|---|
 | [SPEC-0001](SPEC-0001-agent-engineering-setup.md) | Discovery-first agent engineering setup | Approved | 2026-11-19 |
+| [SPEC-0003](SPEC-0003-api-response-envelope-and-pagination.md) | Universal API response shape and pagination | Implemented | 2026-11-27 |
