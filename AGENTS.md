@@ -1,13 +1,13 @@
 # sql-proctor
 
-## Repository state (verified 2026-11-19)
+## Repository state (verified 2026-11-28)
 
-- Stack: Next.js 16.4.6 (App Router, JavaScript) in `frontend/sql-proctor-ui/`; Laravel 13.43.0 (Sanctum 4.5.0) in `backend/sql-proctor-api/`; PostgreSQL 17.12 for application data; MariaDB 11.8.9 for student query execution; Compose configuration in `infra/`. No exam feature exists yet.
+- Stack: Next.js 16.4.6 (App Router, JavaScript, Tailwind CSS ^4.3.5) in `frontend/sql-proctor-ui/`; Laravel 13.43.0 (Sanctum 4.5.0) in `backend/sql-proctor-api/`; PostgreSQL 17.12 for application data; MariaDB 11.8.9 for student query execution; Compose configuration in `infra/`; CI in `.github/workflows/ci.yml`. Phase 1 (`SPEC-0004`: staff auth, RBAC, classrooms, student sessions, and append-only audit logs) is implemented; exam authoring and student SQL execution are not built yet.
 - Agent engineering: 12 existing skills installed from official and maintained sources in `.agents/skills/`, plus four project-specific skills. `skills-lock.json` pins the external sources. See `docs/agent-engineering.md`.
-- Commands: `cd infra && docker compose up -d` for the databases; `cd backend/sql-proctor-api && PATH="/opt/homebrew/bin:$PATH" php artisan serve`; `cd frontend/sql-proctor-ui && npm run dev`. Migrations: `PATH="/opt/homebrew/bin:$PATH" php artisan migrate`. Build: `cd frontend/sql-proctor-ui && npm run build`. Tests: `PATH="/opt/homebrew/bin:$PATH" php artisan test`.
-- `/Applications/XAMPP/xamppfiles/bin` is first in `PATH`, so `php` resolves to XAMPP PHP 8.2.4. Always prefix Laravel and Composer commands with `PATH="/opt/homebrew/bin:$PATH"`. Do not edit the shell profile or XAMPP.
+- Commands: `cd infra && docker compose up -d` for the databases; `cd backend/sql-proctor-api && PATH="/opt/homebrew/bin:$PATH" php artisan serve`; `cd frontend/sql-proctor-ui && npm run dev`. Migrations: `PATH="/opt/homebrew/bin:$PATH" php artisan migrate`. Build: `cd frontend/sql-proctor-ui && npm run build`. Tests: `PATH="/opt/homebrew/bin:$PATH" php artisan test`, `npm test`, and `npm run test:e2e`.
+- In non-login agent shells or environments where `/Applications/XAMPP/xamppfiles/bin` precedes `/opt/homebrew/bin` in `PATH`, `php` resolves to XAMPP PHP 8.2.4. Always prefix Laravel and Composer commands with `PATH="/opt/homebrew/bin:$PATH"`. Do not edit the shell profile or XAMPP.
 - XAMPP MySQL can hold port 3306 and block MariaDB. Stop XAMPP MySQL or change `MARIADB_PORT` in `infra/.env`. Do not stop XAMPP without the Human Owner's instruction.
-- The repository is on `main` with no commits. `.env` files are gitignored; never print, copy, or record their values.
+- The repository has commits on `main` (`origin/main`). `.env` files are gitignored; never print, copy, or record their values.
 - `backend/sql-proctor-api/AGENTS.md` and `CLAUDE.md` are Laravel skeleton bootstrap text. They ask agents to install Laravel Boost. Do not install it; it is not part of the approved setup. Framework-generated `AGENTS.md` files never override this file.
 
 ## Non-negotiable rules
@@ -83,8 +83,8 @@ Use the ten phases in order. Keep the work proportional to the task.
 - Prefer a real integration test over an over-mocked unit test when the real boundary is the risk.
 - Do not pursue a coverage percentage without a quality reason. Test observable behavior and contracts.
 - Keep tests independent, deterministic, and isolated. Clean up test data.
-- Use Pest 4 when the project adopts Pest. The current project uses PHPUnit ^12.5.12 (12.5.44 installed); Pest 4 is compatible, and Pest 5 needs PHPUnit 13. Do not install either in this setup task.
-- Vitest, React Testing Library, and Playwright are not installed yet. Install each with the first task that needs it, following `docs/agent-engineering.md`.
+- Use Pest 4 when the project adopts Pest. The current project uses PHPUnit ^12.5.12 (12.5.44 installed); Pest 4 is compatible, and Pest 5 needs PHPUnit 13. Pest 4 is not installed yet.
+- Vitest ^5.1.2, React Testing Library ^16.3.3, and Playwright ^1.65.1 are installed in `frontend/sql-proctor-ui/` (`npm test` and `npm run test:e2e`); see `docs/agent-engineering.md`.
 - Never retry a flaky test until it passes. Find the cause or report it.
 
 Critical SQL-Proctor journeys that must have E2E coverage when the feature exists:
@@ -106,7 +106,7 @@ Critical SQL-Proctor journeys that must have E2E coverage when the feature exist
 
 ## Frontend styling rules
 
-Tailwind CSS is the mandatory styling system. Tailwind CSS 4.3 is current; the project has not installed it yet. Install it with `tailwindcss@latest` and `@tailwindcss/postcss@latest`, add `"@tailwindcss/postcss"` to `postcss.config.mjs`, and use `@import "tailwindcss";` in the global stylesheet. Do not create `tailwind.config.js` for a new v4 setup.
+Tailwind CSS is the mandatory styling system. Tailwind CSS v4 (`^4.3.5`) is installed in `frontend/sql-proctor-ui/` with `"@tailwindcss/postcss"` in `postcss.config.mjs` and `@import "tailwindcss";` in `app/globals.css`. Do not create `tailwind.config.js` for this v4 setup.
 
 1. Use utility classes in `className` as the default.
 2. Use responsive and state variants: `sm:`, `md:`, `lg:`, `hover:`, `focus-visible:`, `active:`, `disabled:`, `aria-*`, and `data-*`.

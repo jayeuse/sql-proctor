@@ -1,17 +1,18 @@
 # SQL-Proctor
 
-A web-based SQL practical examination system. This repository currently contains the **development environment only**: separate Next.js and Laravel applications, two containerized databases, and documentation. No exam feature is implemented yet.
+A web-based SQL practical examination system with separate Next.js and Laravel applications, PostgreSQL 17, MariaDB 11, and documentation. Phase 1 ([SPEC-0004](docs/specs/SPEC-0004-auth-rbac-and-audit-logging.md)) delivers administrator bootstrap, Sanctum staff authentication, RBAC, classroom codes, Kahoot-style student entry, and append-only audit logging; exam authoring and SQL execution follow in Phases 2 and 3.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 16.4.6, React 19.3.0, JavaScript, App Router, Axios, Monaco Editor |
+| Frontend | Next.js 16.4.6, React 19.3.0, Tailwind CSS ^4.3.5, JavaScript, App Router, Axios, Monaco Editor |
 | Backend | Laravel 13.43.0, PHP 8.5.12, Laravel Sanctum 4.5.0 |
 | Application database | PostgreSQL 17.12 |
 | Student query execution | MariaDB 11.8.9 |
 | Infrastructure | Docker 29.8.0, Docker Compose 5.5.1 |
-| Tests | PHPUnit 12.5.44 (backend; `^12.5.12` constraint). Pest 4 is compatible and not installed. Vitest, React Testing Library, and Playwright are planned and not installed. |
+| Tests | PHPUnit 12.5.44 (backend; `^12.5.12` constraint; Pest 4 compatible, not installed). Vitest ^5.1.2, React Testing Library ^16.3.3, and Playwright ^1.65.1 (frontend unit and E2E). |
+| CI | GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running Pint, PHPUnit, Vitest, ESLint, Next build, and Playwright Chromium |
 
 ## Agent engineering
 
@@ -24,12 +25,13 @@ npx skills list --json     # show the installed project skills
 npx skills update          # update external skills; review the diff first
 ```
 
-No application dependency was installed by this setup. Tailwind CSS, Pest, Vitest, React Testing Library, and Playwright are installed by the first task that needs them.
+Tailwind CSS v4, Vitest, React Testing Library, and Playwright are installed in `frontend/sql-proctor-ui/`. Pest 4 stays uninstalled.
 
 ## Directory structure
 
 ```text
 sql-proctor/
+├── .github/workflows/ci.yml      Backend, frontend, and Playwright E2E CI
 ├── backend/
 │   └── sql-proctor-api/          Laravel API
 ├── frontend/
@@ -45,6 +47,7 @@ sql-proctor/
 │   ├── api-specification.md
 │   ├── development-roadmap.md
 │   ├── agent-engineering.md
+│   ├── plans/                    Implementation plans and test matrices
 │   ├── specs/                    Specifications (SPEC-0001 ...)
 │   ├── templates/                Specification, plan, test, TDD, review, DoD, styling
 │   └── adr/                      Architecture decisions (ADR-0001 ...)
@@ -92,6 +95,7 @@ cp .env.example .env
 php artisan key:generate
 # Set DB_PASSWORD to the POSTGRES_PASSWORD value in infra/.env.
 php artisan migrate
+php artisan app:bootstrap-admin
 ```
 
 ### 3. Frontend
@@ -143,6 +147,18 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept: application/json' \
 
 # UI
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/            # 200
+
+# Backend tests and style
+cd backend/sql-proctor-api
+PATH="/opt/homebrew/bin:$PATH" ./vendor/bin/pint --test
+PATH="/opt/homebrew/bin:$PATH" php artisan test
+
+# Frontend checks and E2E
+cd frontend/sql-proctor-ui
+npm test
+npm run lint
+npm run build
+npm run test:e2e
 ```
 
 ## Stop
@@ -155,7 +171,7 @@ Caution: `docker compose down -v` deletes both database volumes and their data.
 
 ## Known constraints
 
-1. `/Applications/XAMPP/xamppfiles/bin` is first in `PATH`, so `php` resolves to XAMPP PHP 8.2.4. Prefix Laravel and Composer commands with `PATH="/opt/homebrew/bin:$PATH"`. Do not edit the shell profile or XAMPP.
+1. When `/Applications/XAMPP/xamppfiles/bin` precedes Homebrew in `PATH` (for example in non-login agent shells), `php` resolves to XAMPP PHP 8.2.4. Prefix Laravel and Composer commands with `PATH="/opt/homebrew/bin:$PATH"`. Do not edit the XAMPP installation.
 2. XAMPP MySQL listens on port 3306. Stop it (`sudo /Applications/XAMPP/xamppfiles/xampp stopmysql`) or set a different `MARIADB_PORT` before starting MariaDB.
 3. `.env` files are local secrets. Never commit, print, or copy their values into a record.
 4. Laravel 13 and Next.js 16 generate their own `AGENTS.md` files inside each application. They are framework bootstrap notes. This root `AGENTS.md` governs.

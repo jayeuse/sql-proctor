@@ -209,13 +209,13 @@ Reasons are from DEC-0044 point 9. `database-backups` was installed in the first
 |---|---|---|
 | Next.js | 16.4.6, App Router, JavaScript | [architecture.md](architecture.md) verified versions |
 | React | 19.3.0 | [architecture.md](architecture.md) |
-| Tailwind CSS | 4.3 release line; not installed | Research evidence E-02; `AGENTS.md` "Frontend styling rules" |
+| Tailwind CSS | `^4.3.5` (`tailwindcss`, `@tailwindcss/postcss`) installed | `frontend/sql-proctor-ui/package.json`; `AGENTS.md` "Frontend styling rules" |
 | Laravel | 13.43.0, PHP 8.5.12 | [architecture.md](architecture.md) |
 | PHPUnit | 12.5.44 installed (`^12.5.12` constraint) | `backend/sql-proctor-api/composer.json` and `composer.lock`; `AGENTS.md` "Testing policy" |
 | Pest | Pest 4 is compatible with PHPUnit 12; Pest 5 needs PHPUnit 13 and PHP 8.4 | Research evidence E-02; Pest support policy |
-| Vitest | Not installed. Install the current stable in the first frontend test task. Exact version `TBD`. | `AGENTS.md` "Testing policy"; `frontend-testing` skill |
-| React Testing Library | Not installed. RTL 16 or later is the stated minimum for React 19. Exact version `TBD`. | TASK-0109 required inputs; `frontend-testing` skill |
-| Playwright | Not installed. Exact version `TBD`. | `AGENTS.md` "Testing policy" |
+| Vitest | `^5.1.2` (`vitest`, `@vitejs/plugin-react`, `jsdom ^31.0.1`, `msw ^3.0.8`) installed | `frontend/sql-proctor-ui/package.json`; `frontend-testing` skill |
+| React Testing Library | `@testing-library/react ^16.3.3`, `@testing-library/dom ^10.4.2`, `@testing-library/jest-dom ^8.0.0`, `@testing-library/user-event ^14.6.13` installed | `frontend/sql-proctor-ui/package.json`; `frontend-testing` skill |
+| Playwright | `^1.65.1` (`@playwright/test`, Chromium) installed | `frontend/sql-proctor-ui/package.json`; `e2e-playwright-testing` skill |
 | MariaDB | 11.8.9. `MAX_EXECUTION_TIME` is 12.0+; use `SET STATEMENT max_statement_time=...` on 11.8. | Research evidence E-02; [database-design.md](database-design.md) |
 
 ### Tailwind CSS 4.3 install path

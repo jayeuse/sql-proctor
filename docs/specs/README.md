@@ -27,3 +27,4 @@ This folder holds the specifications for changes that are larger than one task n
 |---|---|---|---|
 | [SPEC-0001](SPEC-0001-agent-engineering-setup.md) | Discovery-first agent engineering setup | Approved | 2026-11-19 |
 | [SPEC-0003](SPEC-0003-api-response-envelope-and-pagination.md) | Universal API response shape and pagination | Implemented | 2026-11-27 |
+| [SPEC-0004](SPEC-0004-auth-rbac-and-audit-logging.md) | Authentication, Authorization, and Audit Logging Modules | Approved | 2026-11-28 |
