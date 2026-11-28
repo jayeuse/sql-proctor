@@ -39,17 +39,25 @@ export default function DatasetsManager() {
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
 
-  const loadDatasets = useCallback(async (nextScope, nextSearch, nextPage) => {
-    const res = await api.get("/examiner/datasets", {
-      params: {
-        scope: nextScope,
-        search: nextSearch || undefined,
-        page: nextPage,
-      },
-    });
-    setDatasets(res.data?.data ?? []);
-    setMeta(res.data?.meta ?? { current_page: 1, last_page: 1, total: 0 });
-  }, []);
+  const datasetBasePath = useCallback(
+    (role = currentUser?.role) => (role === "admin" ? "/admin/datasets" : "/examiner/datasets"),
+    [currentUser?.role],
+  );
+
+  const loadDatasets = useCallback(
+    async (nextScope, nextSearch, nextPage, basePath = datasetBasePath()) => {
+      const res = await api.get(basePath, {
+        params: {
+          scope: nextScope,
+          search: nextSearch || undefined,
+          page: nextPage,
+        },
+      });
+      setDatasets(res.data?.data ?? []);
+      setMeta(res.data?.meta ?? { current_page: 1, last_page: 1, total: 0 });
+    },
+    [datasetBasePath],
+  );
 
   useEffect(() => {
     let active = true;
@@ -66,7 +74,7 @@ export default function DatasetsManager() {
           return;
         }
         setCurrentUser(user);
-        await loadDatasets("all", "", 1);
+        await loadDatasets("all", "", 1, datasetBasePath(user.role));
       } catch (err) {
         if (!active) {
           return;
@@ -89,7 +97,7 @@ export default function DatasetsManager() {
     return () => {
       active = false;
     };
-  }, [loadDatasets]);
+  }, [loadDatasets, datasetBasePath]);
 
   function selectDataset(dataset) {
     setError("");
@@ -146,9 +154,10 @@ export default function DatasetsManager() {
         payload.is_shared = form.is_shared;
       }
 
+      const basePath = datasetBasePath();
       const res = form.id
-        ? await api.patch(`/examiner/datasets/${form.id}`, payload)
-        : await api.post("/examiner/datasets", payload);
+        ? await api.patch(`${basePath}/${form.id}`, payload)
+        : await api.post(basePath, payload);
 
       const saved = res.data?.data;
       if (saved) {
@@ -174,7 +183,7 @@ export default function DatasetsManager() {
 
     try {
       await ensureCsrfCookie();
-      const res = await api.post(`/examiner/datasets/${form.id}/validate`);
+      const res = await api.post(`${datasetBasePath()}/${form.id}/validate`);
       const updated = res.data?.data;
       if (updated) {
         selectDataset(updated);
@@ -198,7 +207,7 @@ export default function DatasetsManager() {
 
     try {
       await ensureCsrfCookie();
-      await api.delete(`/examiner/datasets/${form.id}`);
+      await api.delete(`${datasetBasePath()}/${form.id}`);
       resetToNew();
       setNotice("Dataset deleted.");
       await refreshList(1);

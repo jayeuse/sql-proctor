@@ -60,7 +60,8 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
   const [saveStatus, setSaveStatus] = useState("");
   const [actionFeedback, setActionFeedback] = useState(null);
 
-  const debounceRef = useRef(null);
+  const debounceTimersRef = useRef({});
+  const dirtyQuestionIdsRef = useRef(new Set());
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
@@ -109,9 +110,8 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
 
     return () => {
       active = false;
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      Object.values(debounceTimersRef.current).forEach((timerId) => clearTimeout(timerId));
+      debounceTimersRef.current = {};
     };
   }, [attemptId]);
 
@@ -147,15 +147,20 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
 
   const persistAnswer = useCallback(
     async (question, overrideAnswer = null, { submit = false } = {}) => {
-      if (!attemptId || !question || locked || answersRef.current[question.id]?.isSubmitted) {
-        return;
+      if (!attemptId || !question || locked) {
+        return false;
+      }
+      if (answersRef.current[question.id]?.isSubmitted) {
+        dirtyQuestionIdsRef.current.delete(question.id);
+        return true;
       }
       const draft = overrideAnswer ?? answersRef.current[question.id];
       if (!draft) {
-        return;
+        return true;
       }
-      if (submit && debounceRef.current) {
-        clearTimeout(debounceRef.current);
+      if (debounceTimersRef.current[question.id]) {
+        clearTimeout(debounceTimersRef.current[question.id]);
+        delete debounceTimersRef.current[question.id];
       }
 
       setError("");
@@ -186,6 +191,10 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
         const submittedAt = submit ? (saved.submitted_at ?? updatedAt) : (saved.submitted_at ?? null);
         const nowSubmitted = Boolean(submit || saved.is_submitted || submittedAt);
 
+        if (nowSubmitted || answersRef.current[question.id] === draft) {
+          dirtyQuestionIdsRef.current.delete(question.id);
+        }
+
         setAnswers((prev) => ({
           ...prev,
           [question.id]: {
@@ -207,11 +216,14 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
           setSaveStatus("Draft saved");
           setActionFeedback({ tone: "success", text: "Draft saved." });
         }
+
+        return true;
       } catch (err) {
         const apiErr = extractApiError(err, "Failed to save answer.");
         if (apiErr.code === "attempt_expired" || apiErr.code === "attempt_not_active") {
           setLocked(true);
         } else if (apiErr.code === "answer_locked") {
+          dirtyQuestionIdsRef.current.delete(question.id);
           setConfirmAnswerQuestionId(null);
           setAnswers((prev) => ({
             ...prev,
@@ -221,10 +233,15 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
               submittedAt: prev[question.id]?.submittedAt ?? new Date().toISOString(),
             },
           }));
+          setSaveStatus("Answer submitted");
+          setActionFeedback(null);
+          setError(apiErr.message);
+          return true;
         }
         setSaveStatus("");
         setActionFeedback(null);
         setError(apiErr.message);
+        return false;
       } finally {
         setSavingQuestionId(null);
         setSubmittingAnswerId(null);
@@ -237,11 +254,12 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
     if (locked || answersRef.current[question.id]?.isSubmitted) {
       return;
     }
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
+    if (debounceTimersRef.current[question.id]) {
+      clearTimeout(debounceTimersRef.current[question.id]);
     }
     setSaveStatus("Unsaved changes");
-    debounceRef.current = setTimeout(() => {
+    debounceTimersRef.current[question.id] = setTimeout(() => {
+      delete debounceTimersRef.current[question.id];
       persistAnswer(question, nextDraft);
     }, 800);
   }
@@ -250,6 +268,7 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
     if (!activeQuestion || locked || answersRef.current[activeQuestion.id]?.isSubmitted) {
       return;
     }
+    dirtyQuestionIdsRef.current.add(activeQuestion.id);
     setAnswers((prev) => {
       const current = prev[activeQuestion.id] ?? {
         submitted_sql: "",
@@ -266,6 +285,22 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
         [activeQuestion.id]: next,
       };
     });
+  }
+
+  function handleSelectQuestion(nextIndex) {
+    if (
+      activeQuestion &&
+      nextIndex !== activeIndex &&
+      !locked &&
+      !answersRef.current[activeQuestion.id]?.isSubmitted &&
+      dirtyQuestionIdsRef.current.has(activeQuestion.id)
+    ) {
+      void persistAnswer(activeQuestion);
+    }
+    setActiveIndex(nextIndex);
+    setQueryResult(null);
+    setConfirmAnswerQuestionId(null);
+    setActionFeedback(null);
   }
 
   function handleResetStarter() {
@@ -339,16 +374,22 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
       return;
     }
     setError("");
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
+    Object.values(debounceTimersRef.current).forEach((timerId) => clearTimeout(timerId));
+    debounceTimersRef.current = {};
     setConfirmAnswerQuestionId(null);
     setSubmitting(true);
 
     try {
       await ensureCsrfCookie();
-      if (activeQuestion && !locked && !answersRef.current[activeQuestion.id]?.isSubmitted) {
-        await persistAnswer(activeQuestion);
+      if (!locked) {
+        for (const q of questions) {
+          if (dirtyQuestionIdsRef.current.has(q.id) && !answersRef.current[q.id]?.isSubmitted) {
+            const ok = await persistAnswer(q);
+            if (!ok) {
+              return;
+            }
+          }
+        }
       }
       await api.post(`/student/attempts/${attemptId}/submit`);
       router.push(`/student/exams/${attemptId}/result`);
@@ -482,12 +523,7 @@ export default function StudentExamWorkspace({ attemptId: attemptIdProp }) {
                       <button
                         key={q.id}
                         type="button"
-                        onClick={() => {
-                          setActiveIndex(idx);
-                          setQueryResult(null);
-                          setConfirmAnswerQuestionId(null);
-                          setActionFeedback(null);
-                        }}
+                        onClick={() => handleSelectQuestion(idx)}
                         className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
                           isCurrent
                             ? qSubmitted
