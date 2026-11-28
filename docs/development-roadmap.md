@@ -44,7 +44,7 @@ Delivered under [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md) and 
 
 Exit criteria verified:
 
-1. Backend Pint formatting and 95 PostgreSQL PHPUnit feature/integration tests pass.
+1. Backend Pint formatting and 98 PostgreSQL PHPUnit feature/integration tests pass.
 2. Frontend ESLint, Next.js production build, 20 Vitest tests, and 11 Chromium Playwright E2E journeys pass.
 3. Unauthenticated and cross-role access return `401` and `403`, and `audit_logs` rejects direct `UPDATE`/`DELETE`.
 
