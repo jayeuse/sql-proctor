@@ -42,6 +42,42 @@ export default function AdminDashboard() {
     to: "",
   });
 
+  // Exams oversight state
+  const [adminExams, setAdminExams] = useState([]);
+  const [adminExamsMeta, setAdminExamsMeta] = useState(null);
+  const [adminExamsLoading, setAdminExamsLoading] = useState(false);
+  const [examStatusFilter, setExamStatusFilter] = useState("");
+  const [examSearch, setExamSearch] = useState("");
+  const [forceTargetExam, setForceTargetExam] = useState(null);
+  const [forceReason, setForceReason] = useState("");
+  const [forceCloseActive, setForceCloseActive] = useState(true);
+  const [forceSubmitting, setForceSubmitting] = useState(false);
+  const [adminExamNotice, setAdminExamNotice] = useState(null);
+
+  const loadAdminExams = useCallback(async (page = 1, statusVal = "", searchVal = "") => {
+    setAdminExamsLoading(true);
+    try {
+      const res = await api.get("/admin/exams", {
+        params: {
+          page,
+          per_page: 15,
+          status: statusVal || undefined,
+          search: searchVal.trim() || undefined,
+        },
+      });
+      setAdminExams(res.data?.data ?? []);
+      setAdminExamsMeta(res.data?.meta ?? null);
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        routerRef.current.push("/login");
+        return;
+      }
+      setError(extractApiError(err, "Failed to load exams.").message);
+    } finally {
+      setAdminExamsLoading(false);
+    }
+  }, []);
+
   const loadExaminers = useCallback(async (page = 1, username = "", status = "all", { silent = false } = {}) => {
     if (!silent) {
       setExaminersLoading(true);
@@ -249,6 +285,42 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleForceUnpublish(event) {
+    event.preventDefault();
+    if (!forceTargetExam || forceSubmitting) {
+      return;
+    }
+    setError(null);
+    setAdminExamNotice(null);
+
+    const trimmed = forceReason.trim();
+    if (trimmed.length < 5) {
+      setError("Enter a reason of at least 5 characters before force-unpublishing.");
+      return;
+    }
+
+    setForceSubmitting(true);
+    try {
+      await ensureCsrfCookie();
+      await api.post(`/admin/exams/${forceTargetExam.id}/force-unpublish`, {
+        reason: trimmed,
+        force_close_active: forceCloseActive,
+      });
+      setAdminExamNotice(`Force-unpublished "${forceTargetExam.title}".`);
+      setForceTargetExam(null);
+      setForceReason("");
+      await loadAdminExams(adminExamsMeta?.current_page ?? 1, examStatusFilter, examSearch);
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        router.push("/login");
+        return;
+      }
+      setError(extractApiError(err, "Could not force-unpublish exam.").message);
+    } finally {
+      setForceSubmitting(false);
+    }
+  }
+
   function handleTabSwitch(tab) {
     setActiveTab(tab);
     setError(null);
@@ -257,6 +329,9 @@ export default function AdminDashboard() {
     }
     if (tab === "audit") {
       loadAuditLogs(1, auditFilters);
+    }
+    if (tab === "exams") {
+      loadAdminExams(1, examStatusFilter, examSearch);
     }
   }
 
@@ -303,6 +378,19 @@ export default function AdminDashboard() {
             }`}
           >
             Examiners
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "exams"}
+            onClick={() => handleTabSwitch("exams")}
+            className={`border-b-2 px-4 py-2.5 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${
+              activeTab === "exams"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Exams
           </button>
           <button
             type="button"
@@ -545,6 +633,193 @@ export default function AdminDashboard() {
               ) : null}
             </section>
           </div>
+        ) : activeTab === "exams" ? (
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Exams oversight</h2>
+                <p className="text-xs text-slate-600">
+                  Review published and draft exams across all examiners, or force-unpublish compromised exams.
+                </p>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setError(null);
+                  loadAdminExams(1, examStatusFilter, examSearch);
+                }}
+                className="flex flex-wrap gap-2"
+              >
+                <select
+                  aria-label="Filter exam status"
+                  value={examStatusFilter}
+                  onChange={(e) => setExamStatusFilter(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900"
+                >
+                  <option value="">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                  <option value="unpublished">Unpublished</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <input
+                  aria-label="Search admin exams"
+                  type="text"
+                  value={examSearch}
+                  onChange={(e) => setExamSearch(e.target.value)}
+                  placeholder="Search title..."
+                  className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Filter
+                </button>
+              </form>
+            </div>
+
+            {adminExamNotice ? (
+              <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                {adminExamNotice}
+              </div>
+            ) : null}
+
+            {forceTargetExam ? (
+              <form
+                onSubmit={handleForceUnpublish}
+                className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4"
+              >
+                <p className="text-sm font-semibold text-amber-950">
+                  Force Unpublish: {forceTargetExam.title}
+                </p>
+                <div>
+                  <label htmlFor="force-reason" className="block text-xs font-medium text-amber-950">
+                    Reason
+                  </label>
+                  <input
+                    id="force-reason"
+                    type="text"
+                    value={forceReason}
+                    onChange={(e) => setForceReason(e.target.value)}
+                    placeholder="Provide audit reason..."
+                    className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-amber-950">
+                  <input
+                    type="checkbox"
+                    checked={forceCloseActive}
+                    onChange={(e) => setForceCloseActive(e.target.checked)}
+                  />
+                  Force-close active student attempts
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    disabled={forceSubmitting}
+                    className="rounded-lg bg-rose-700 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+                  >
+                    {forceSubmitting ? "Submitting..." : "Confirm Force Unpublish"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForceTargetExam(null);
+                      setForceReason("");
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {adminExamsLoading ? (
+              <p className="text-sm text-slate-600">Loading exams...</p>
+            ) : adminExams.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                No exams found.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                  <thead className="bg-slate-50 font-semibold uppercase tracking-wide text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2.5">Title</th>
+                      <th className="px-3 py-2.5">Examiner</th>
+                      <th className="px-3 py-2.5">Status</th>
+                      <th className="px-3 py-2.5">Version</th>
+                      <th className="px-3 py-2.5">Questions / Attempts</th>
+                      <th className="px-3 py-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {adminExams.map((exam) => (
+                      <tr key={exam.id}>
+                        <td className="px-3 py-2.5 font-medium text-slate-900">{exam.title}</td>
+                        <td className="px-3 py-2.5 font-mono text-slate-700">
+                          @{exam.examiner?.username ?? exam.examiner_id}
+                        </td>
+                        <td className="px-3 py-2.5 capitalize text-slate-700">{exam.status}</td>
+                        <td className="px-3 py-2.5 font-mono">
+                          {exam.current_version_number ? `v${exam.current_version_number}` : "-"}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-600">
+                          {exam.questions_count ?? 0} q · {exam.attempts_count ?? 0} attempts
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          {exam.status === "published" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setError(null);
+                                setForceTargetExam(exam);
+                                setForceReason("");
+                                setForceCloseActive(true);
+                              }}
+                              className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1 font-semibold text-rose-700 hover:bg-rose-100"
+                            >
+                              Force Unpublish
+                            </button>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {adminExamsMeta && adminExamsMeta.last_page > 1 ? (
+              <div className="flex items-center justify-between text-xs text-slate-600">
+                <span>
+                  Page {adminExamsMeta.current_page} of {adminExamsMeta.last_page}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={adminExamsMeta.current_page <= 1}
+                    onClick={() => loadAdminExams(adminExamsMeta.current_page - 1, examStatusFilter, examSearch)}
+                    className="rounded border border-slate-300 px-2.5 py-1 disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={adminExamsMeta.current_page >= adminExamsMeta.last_page}
+                    onClick={() => loadAdminExams(adminExamsMeta.current_page + 1, examStatusFilter, examSearch)}
+                    className="rounded border border-slate-300 px-2.5 py-1 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
         ) : (
           <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
             <div className="flex flex-wrap items-end justify-between gap-3">
