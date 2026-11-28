@@ -91,20 +91,25 @@ class StudentSessionController extends Controller
                 ->where('expires_at', '<=', now())
                 ->update(['revoked_at' => now()]);
 
-            $duplicateExists = StudentSession::query()
+            $hasValidPreviousSession = is_string($previousSessionId) && Str::isUuid($previousSessionId);
+
+            $duplicateQuery = StudentSession::query()
                 ->where('classroom_id', $classroom->id)
                 ->where('normalized_display_name', $normalizedName)
-                ->whereNull('revoked_at')
-                ->exists();
+                ->whereNull('revoked_at');
 
-            if ($duplicateExists) {
+            if ($hasValidPreviousSession) {
+                $duplicateQuery->whereKeyNot($previousSessionId);
+            }
+
+            if ($duplicateQuery->exists()) {
                 return ['session' => null, 'superseded' => null, 'failure' => ['kind' => 'duplicate_display_name', 'classroom_id' => $classroom->id]];
             }
 
             $now = now();
             $superseded = null;
 
-            if (is_string($previousSessionId) && Str::isUuid($previousSessionId)) {
+            if ($hasValidPreviousSession) {
                 $existingSession = StudentSession::query()
                     ->whereKey($previousSessionId)
                     ->whereNull('revoked_at')
