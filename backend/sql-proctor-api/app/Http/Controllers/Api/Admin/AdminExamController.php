@@ -7,6 +7,7 @@ use App\Enums\AttemptStatus;
 use App\Enums\AuditEvent;
 use App\Enums\ExamStatus;
 use App\Exceptions\ApiException;
+use App\Exceptions\SandboxUnavailableException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ForceUnpublishExamRequest;
 use App\Http\Requests\Examiner\ListExamsRequest;
@@ -89,13 +90,13 @@ class AdminExamController extends Controller
         $reason = (string) $request->validated('reason');
         $forceClose = $request->boolean('force_close_active', true);
 
-        DB::transaction(function () use ($request, $admin, $exam, $reason, $forceClose, $gradingService, $auditLogger): void {
+        $attemptsToGrade = DB::transaction(function () use ($request, $admin, $exam, $reason, $forceClose, $auditLogger): array {
             $exam->forceFill([
                 'status' => ExamStatus::Unpublished,
                 'unpublished_at' => now(),
             ])->save();
 
-            $closedCount = 0;
+            $closedAttempts = [];
 
             if ($forceClose) {
                 $activeAttempts = ExamAttempt::query()
@@ -110,8 +111,7 @@ class AdminExamController extends Controller
                         'submitted_at' => now(),
                     ])->save();
 
-                    $gradingService->gradeAttempt($attempt);
-                    $closedCount++;
+                    $closedAttempts[] = $attempt;
 
                     $auditLogger->log(
                         eventType: AuditEvent::StudentExamForceClosed,
@@ -136,11 +136,21 @@ class AdminExamController extends Controller
                 metadata: [
                     'reason' => $reason,
                     'force_close_active' => $forceClose,
-                    'force_closed_count' => $closedCount,
+                    'force_closed_count' => count($closedAttempts),
                 ],
                 request: $request,
             );
+
+            return $closedAttempts;
         });
+
+        foreach ($attemptsToGrade as $attemptToGrade) {
+            try {
+                $gradingService->gradeAttempt($attemptToGrade);
+            } catch (SandboxUnavailableException $e) {
+                report($e);
+            }
+        }
 
         $exam->refresh()->load(['examiner:id,username,name', 'dataset'])->loadCount(['questions', 'attempts']);
 

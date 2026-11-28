@@ -4,6 +4,9 @@ return [
     'sandbox' => [
         'prefix' => 'sbx_',
         'statement_timeout_seconds' => (float) env('SQL_SANDBOX_TIMEOUT_SECONDS', 2),
+        'provision_timeout_seconds' => (float) env('SQL_SANDBOX_PROVISION_TIMEOUT_SECONDS', 5),
+        'max_total_execution_seconds' => (float) env('SQL_SANDBOX_MAX_TOTAL_SECONDS', 12),
+        'attempt_lock_seconds' => (int) env('SQL_SANDBOX_LOCK_SECONDS', 30),
         'connect_timeout_seconds' => (int) env('SQL_SANDBOX_CONNECT_TIMEOUT_SECONDS', 5),
         'max_payload_bytes' => (int) env('SQL_SANDBOX_MAX_PAYLOAD_BYTES', 16384),
         'max_statements' => (int) env('SQL_SANDBOX_MAX_STATEMENTS', 20),

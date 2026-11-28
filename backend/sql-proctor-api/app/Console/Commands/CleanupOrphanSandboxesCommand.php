@@ -46,11 +46,22 @@ class CleanupOrphanSandboxesCommand extends Command
         foreach (array_keys($existingMap) as $schema) {
             if ($olderThanMinutes > 0) {
                 $ageStmt = $provPdo->prepare(
-                    'SELECT MAX(CREATE_TIME) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+                    'SELECT TIMESTAMPDIFF(MINUTE, MAX(CREATE_TIME), UTC_TIMESTAMP()) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
                 );
                 $ageStmt->execute([$schema]);
-                $latestCreate = $ageStmt->fetchColumn();
-                if (is_string($latestCreate) && strtotime($latestCreate) > (time() - ($olderThanMinutes * 60))) {
+                $ageMinutes = $ageStmt->fetchColumn();
+
+                if ($ageMinutes !== null && $ageMinutes !== false) {
+                    if ((int) $ageMinutes < $olderThanMinutes) {
+                        continue;
+                    }
+                } elseif (preg_match('/^'.preg_quote($prefix, '/').'([0-9a-f]{8})[0-9a-f]{24}$/i', $schema, $matches) === 1) {
+                    $createdTs = (int) hexdec($matches[1]);
+                    if ((time() - $createdTs) < ($olderThanMinutes * 60)) {
+                        continue;
+                    }
+                } else {
+                    // Empty schema without timestamp metadata: preserve when age cutoff > 0 unless explicitly swept with --older-than-minutes=0.
                     continue;
                 }
             }

@@ -7,12 +7,14 @@ use App\Enums\GradingMode;
 use App\Enums\QuestionType;
 use App\Exceptions\ApiException;
 use App\Models\Exam;
+use App\Services\SqlExecution\SchemaIntrospector;
 use App\Services\SqlExecution\SqlExecutionService;
 
 class ExamValidationService
 {
     public function __construct(
         private readonly SqlExecutionService $sqlExecutor,
+        private readonly SchemaIntrospector $schemaIntrospector,
     ) {}
 
     /**
@@ -43,6 +45,20 @@ class ExamValidationService
                 if (in_array($question->grading_mode, [GradingMode::Auto, GradingMode::Hybrid], true)
                     && trim((string) $question->reference_sql) === '') {
                     $issues[] = "{$prefix}: auto/hybrid SQL question requires reference_sql.";
+                }
+
+                if (in_array($question->question_type, [QuestionType::SqlDml, QuestionType::SqlDdl], true)
+                    && in_array($question->grading_mode, [GradingMode::Auto, GradingMode::Hybrid], true)) {
+                    if ($question->testCases->isEmpty()) {
+                        $issues[] = "{$prefix}: auto/hybrid DML/DDL questions require at least one test case with assertion_sql.";
+                    } else {
+                        foreach ($question->testCases as $tc) {
+                            if ($tc->expected_behavior !== ExpectedBehavior::ExpectError
+                                && trim((string) $tc->assertion_sql) === '') {
+                                $issues[] = "{$prefix} / {$tc->name}: DML/DDL test case requires non-empty assertion_sql.";
+                            }
+                        }
+                    }
                 }
 
                 if ($question->testCases->isNotEmpty()) {
@@ -88,6 +104,14 @@ class ExamValidationService
                 $issues[] = 'Dataset schema_sql + seed_sql failed MariaDB dry-run: '.($baseProbe->errorMessage ?? 'unknown error');
 
                 return $issues;
+            }
+
+            if ($dataset->schema_summary === null) {
+                $summary = $this->schemaIntrospector->introspect($schemaSql, $baseSeedSql);
+                $dataset->forceFill([
+                    'schema_summary' => $summary,
+                    'validated_at' => now(),
+                ])->save();
             }
 
             foreach ($exam->questions as $question) {

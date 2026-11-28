@@ -87,6 +87,10 @@ class ExamAttemptGradingController extends Controller
     ): JsonResponse {
         Gate::authorize('grade', $attempt);
 
+        if ($attempt->isInProgress()) {
+            throw ApiException::conflict('Cannot grade an attempt that is still in progress.', 'attempt_still_in_progress');
+        }
+
         if ($answer->attempt_id !== $attempt->id) {
             throw ApiException::notFound();
         }

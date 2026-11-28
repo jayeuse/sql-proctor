@@ -361,6 +361,16 @@ class ExamGradingService
             ];
         }
 
+        if ($behavior !== ExpectedBehavior::ExpectError
+            && in_array($questionType, [QuestionType::SqlDml, QuestionType::SqlDdl], true)
+            && $assertionSql === null) {
+            return [
+                'passed' => false,
+                'execution_ms' => 0,
+                'message' => 'Missing post-state assertion SQL for DML/DDL evaluation.',
+            ];
+        }
+
         $subRun = $this->sqlExecutor->execute($schemaSql, $seedSql, $submittedSql, $questionType, $assertionSql);
         if (! $subRun->succeeded()) {
             return [
@@ -386,6 +396,22 @@ class ExamGradingService
                 'passed' => false,
                 'execution_ms' => $subRun->executionMs,
                 'message' => 'Reference evaluation failed.',
+            ];
+        }
+
+        if ($subRun->truncated) {
+            return [
+                'passed' => false,
+                'execution_ms' => $subRun->executionMs,
+                'message' => 'Submitted SQL query output exceeded the grading cap and was truncated.',
+            ];
+        }
+
+        if ($refRun->truncated) {
+            return [
+                'passed' => false,
+                'execution_ms' => $subRun->executionMs,
+                'message' => 'Reference SQL query output exceeded the grading cap and could not be verified.',
             ];
         }
 

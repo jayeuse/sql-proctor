@@ -11,6 +11,7 @@ use App\Enums\ExamStatus;
 use App\Enums\QueryRunStatus;
 use App\Enums\QuestionType;
 use App\Exceptions\ApiException;
+use App\Exceptions\SandboxUnavailableException;
 use App\Http\Controllers\Controller;
 use App\Http\Middleware\VerifyStudentSession;
 use App\Http\Requests\Student\RunQuestionQueryRequest;
@@ -224,7 +225,6 @@ class StudentExamController extends Controller
             $validated,
             $question,
             $submitNow,
-            $gradingService,
             $auditLogger,
         ): array {
             $lockedAttempt = ExamAttempt::query()->lockForUpdate()->findOrFail($attempt->id);
@@ -239,8 +239,6 @@ class StudentExamController extends Controller
                     'submitted_at' => now(),
                 ])->save();
 
-                $gradingService->gradeAttempt($lockedAttempt);
-
                 $auditLogger->log(
                     eventType: AuditEvent::StudentExamAutoSubmitted,
                     actorType: ActorType::Student,
@@ -252,7 +250,7 @@ class StudentExamController extends Controller
                     request: $request,
                 );
 
-                return ['status' => 'attempt_expired'];
+                return ['status' => 'attempt_expired', 'attempt' => $lockedAttempt];
             }
 
             $existing = AttemptAnswer::query()
@@ -305,6 +303,8 @@ class StudentExamController extends Controller
         }
 
         if ($outcome['status'] === 'attempt_expired') {
+            $this->gradeAttemptSafely($gradingService, $outcome['attempt']);
+
             throw ApiException::conflict('Attempt time has expired and was automatically submitted.', 'attempt_expired');
         }
 
@@ -408,21 +408,8 @@ class StudentExamController extends Controller
             throw ApiException::forbidden('Query preview is disabled for this exam.', 'query_preview_disabled');
         }
 
-        $maxRuns = $settings['max_query_runs_per_question'] ?? null;
-        if ($maxRuns !== null) {
-            $usedRuns = AttemptQueryRun::query()
-                ->where('attempt_id', $attempt->id)
-                ->where('question_id', $questionId)
-                ->count();
-            if ($usedRuns >= (int) $maxRuns) {
-                throw ApiException::tooManyRequests(
-                    "Maximum of {$maxRuns} query runs reached for this question.",
-                    'query_run_limit_reached',
-                );
-            }
-        }
-
-        $lock = Cache::lock("sandbox:attempt:{$attempt->id}", 10);
+        $lockSeconds = max(15, (int) config('sql_proctor.sandbox.attempt_lock_seconds', 30));
+        $lock = Cache::lock("sandbox:attempt:{$attempt->id}", $lockSeconds);
         if (! $lock->get()) {
             throw ApiException::conflict(
                 'Another query is already running on this attempt. Please wait.',
@@ -430,46 +417,60 @@ class StudentExamController extends Controller
             );
         }
 
-        RateLimiter::hit($throttleKey, 60);
-
-        $sql = (string) $request->validated('sql');
-        $dataset = is_array($snapshot['dataset'] ?? null) ? $snapshot['dataset'] : null;
-        $schemaSql = (string) ($dataset['schema_sql'] ?? '');
-        $seedSql = (string) ($dataset['seed_sql'] ?? '');
-
         try {
+            $maxRuns = $settings['max_query_runs_per_question'] ?? null;
+            if ($maxRuns !== null) {
+                $usedRuns = AttemptQueryRun::query()
+                    ->where('attempt_id', $attempt->id)
+                    ->where('question_id', $questionId)
+                    ->count();
+                if ($usedRuns >= (int) $maxRuns) {
+                    throw ApiException::tooManyRequests(
+                        "Maximum of {$maxRuns} query runs reached for this question.",
+                        'query_run_limit_reached',
+                    );
+                }
+            }
+
+            RateLimiter::hit($throttleKey, 60);
+
+            $sql = (string) $request->validated('sql');
+            $dataset = is_array($snapshot['dataset'] ?? null) ? $snapshot['dataset'] : null;
+            $schemaSql = (string) ($dataset['schema_sql'] ?? '');
+            $seedSql = (string) ($dataset['seed_sql'] ?? '');
+
             $result = $sqlExecutor->execute($schemaSql, $seedSql, $sql, $questionType);
+
+            $runStatus = QueryRunStatus::tryFrom($result->status) ?? QueryRunStatus::SystemError;
+
+            AttemptQueryRun::create([
+                'attempt_id' => $attempt->id,
+                'question_id' => $questionId,
+                'sql_text' => $sql,
+                'status' => $runStatus,
+                'row_count' => $result->rowCount,
+                'execution_ms' => $result->executionMs,
+                'error_message' => $result->errorMessage,
+                'created_at' => now(),
+            ]);
+
+            if ($runStatus === QueryRunStatus::PolicyBlocked) {
+                $auditLogger->log(
+                    eventType: AuditEvent::StudentQueryBlocked,
+                    actorType: ActorType::Student,
+                    actorId: $session->id,
+                    actorLabel: $session->display_name,
+                    targetType: 'exam_attempt',
+                    targetId: $attempt->id,
+                    metadata: [
+                        'question_id' => $questionId,
+                        'reason' => $result->errorMessage,
+                    ],
+                    request: $request,
+                );
+            }
         } finally {
             $lock->release();
-        }
-
-        $runStatus = QueryRunStatus::tryFrom($result->status) ?? QueryRunStatus::SystemError;
-
-        AttemptQueryRun::create([
-            'attempt_id' => $attempt->id,
-            'question_id' => $questionId,
-            'sql_text' => $sql,
-            'status' => $runStatus,
-            'row_count' => $result->rowCount,
-            'execution_ms' => $result->executionMs,
-            'error_message' => $result->errorMessage,
-            'created_at' => now(),
-        ]);
-
-        if ($runStatus === QueryRunStatus::PolicyBlocked) {
-            $auditLogger->log(
-                eventType: AuditEvent::StudentQueryBlocked,
-                actorType: ActorType::Student,
-                actorId: $session->id,
-                actorLabel: $session->display_name,
-                targetType: 'exam_attempt',
-                targetId: $attempt->id,
-                metadata: [
-                    'question_id' => $questionId,
-                    'reason' => $result->errorMessage,
-                ],
-                request: $request,
-            );
         }
 
         return response()->json(['data' => $result->toStudentArray()]);
@@ -484,11 +485,11 @@ class StudentExamController extends Controller
         $attempt = ExamAttempt::findOrFail($attemptId);
         $session = $this->authorizeAttemptOwner($request, $attempt);
 
-        $outcome = DB::transaction(function () use ($request, $attempt, $session, $gradingService, $auditLogger): string {
+        $result = DB::transaction(function () use ($request, $attempt, $session, $auditLogger): array {
             $locked = ExamAttempt::query()->lockForUpdate()->findOrFail($attempt->id);
 
             if (! $locked->isInProgress()) {
-                return 'not_active';
+                return ['outcome' => 'not_active', 'attempt' => $locked];
             }
 
             if ($locked->hasExpired()) {
@@ -496,8 +497,6 @@ class StudentExamController extends Controller
                     'status' => AttemptStatus::AutoSubmitted,
                     'submitted_at' => now(),
                 ])->save();
-
-                $gradingService->gradeAttempt($locked);
 
                 $auditLogger->log(
                     eventType: AuditEvent::StudentExamAutoSubmitted,
@@ -510,15 +509,13 @@ class StudentExamController extends Controller
                     request: $request,
                 );
 
-                return 'expired';
+                return ['outcome' => 'expired', 'attempt' => $locked];
             }
 
             $locked->forceFill([
                 'status' => AttemptStatus::Submitted,
                 'submitted_at' => now(),
             ])->save();
-
-            $gradingService->gradeAttempt($locked);
 
             $auditLogger->log(
                 eventType: AuditEvent::StudentExamSubmitted,
@@ -531,14 +528,16 @@ class StudentExamController extends Controller
                 request: $request,
             );
 
-            return 'submitted';
+            return ['outcome' => 'submitted', 'attempt' => $locked];
         });
 
-        if ($outcome === 'not_active') {
+        if ($result['outcome'] === 'not_active') {
             throw ApiException::conflict('This attempt has already been submitted or closed.', 'attempt_not_active');
         }
 
-        if ($outcome === 'expired') {
+        $this->gradeAttemptSafely($gradingService, $result['attempt']);
+
+        if ($result['outcome'] === 'expired') {
             throw ApiException::conflict('Attempt time expired and was automatically submitted.', 'attempt_expired');
         }
 
@@ -603,7 +602,7 @@ class StudentExamController extends Controller
         AuditLogger $auditLogger,
         Request $request,
     ): ExamAttempt {
-        return DB::transaction(function () use ($attempt, $session, $gradingService, $auditLogger, $request): ExamAttempt {
+        $tx = DB::transaction(function () use ($attempt, $session, $auditLogger, $request): array {
             $locked = ExamAttempt::query()->lockForUpdate()->findOrFail($attempt->id);
 
             if ($locked->isInProgress()) {
@@ -611,8 +610,6 @@ class StudentExamController extends Controller
                     'status' => AttemptStatus::AutoSubmitted,
                     'submitted_at' => now(),
                 ])->save();
-
-                $gradingService->gradeAttempt($locked);
 
                 $auditLogger->log(
                     eventType: AuditEvent::StudentExamAutoSubmitted,
@@ -624,9 +621,26 @@ class StudentExamController extends Controller
                     metadata: ['classroom_exam_id' => $locked->classroom_exam_id],
                     request: $request,
                 );
+
+                return ['attempt' => $locked, 'justExpired' => true];
             }
 
-            return $locked->fresh();
+            return ['attempt' => $locked, 'justExpired' => false];
         });
+
+        if ($tx['justExpired']) {
+            $this->gradeAttemptSafely($gradingService, $tx['attempt']);
+        }
+
+        return $tx['attempt']->fresh();
+    }
+
+    private function gradeAttemptSafely(ExamGradingService $gradingService, ExamAttempt $attempt): void
+    {
+        try {
+            $gradingService->gradeAttempt($attempt);
+        } catch (SandboxUnavailableException $e) {
+            report($e);
+        }
     }
 }

@@ -37,10 +37,27 @@ class SqlGuard
     ];
 
     /**
+     * Metadata & server-introspection patterns forbidden in untrusted student SQL.
+     * Allowed only for provisioner scripts or examiner-authored assertion_sql queries.
+     *
+     * @var array<int, string>
+     */
+    private const array STUDENT_ONLY_BLOCKED_PATTERNS = [
+        '/\b(DATABASE|SCHEMA|USER|CURRENT_USER|SYSTEM_USER|SESSION_USER|VERSION|CURRENT_ROLE)\s*\(/i',
+        '/\b(CURRENT_USER|CURRENT_ROLE)\b/i',
+        '/@@[a-z0-9_.]+/i',
+        '/`?information_schema`?\s*\./i',
+    ];
+
+    /**
      * @return array{ok: bool, statements: array<int, string>, reason: ?string}
      */
-    public function validate(string $sql, QuestionType|string $questionType, bool $isProvisioner = false): array
-    {
+    public function validate(
+        string $sql,
+        QuestionType|string $questionType,
+        bool $isProvisioner = false,
+        bool $isTrustedAssertion = false,
+    ): array {
         if (! mb_check_encoding($sql, 'UTF-8')) {
             return ['ok' => false, 'statements' => [], 'reason' => 'SQL input must be valid UTF-8 text.'];
         }
@@ -74,6 +91,14 @@ class SqlGuard
             foreach (self::BLOCKED_PATTERNS as $pattern) {
                 if (preg_match($pattern, $inspected) === 1) {
                     return ['ok' => false, 'statements' => [], 'reason' => 'Statement contains a disallowed SQL directive or restricted schema reference.'];
+                }
+            }
+
+            if (! $isProvisioner && ! $isTrustedAssertion) {
+                foreach (self::STUDENT_ONLY_BLOCKED_PATTERNS as $pattern) {
+                    if (preg_match($pattern, $inspected) === 1) {
+                        return ['ok' => false, 'statements' => [], 'reason' => 'Statement contains a restricted metadata or system introspection reference.'];
+                    }
                 }
             }
 

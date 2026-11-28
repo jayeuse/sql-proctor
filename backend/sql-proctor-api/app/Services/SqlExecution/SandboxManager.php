@@ -3,6 +3,7 @@
 namespace App\Services\SqlExecution;
 
 use App\Enums\QuestionType;
+use App\Exceptions\SandboxProvisioningException;
 use App\Exceptions\SandboxUnavailableException;
 use PDO;
 use Pdo\Mysql;
@@ -34,6 +35,7 @@ class SandboxManager
         $runnerUser = (string) ($runnerConfig['username'] ?? 'sql_runner');
         $runnerHost = (string) config('sql_proctor.sandbox.runner_host', '%');
         $timeoutSeconds = (float) config('sql_proctor.sandbox.statement_timeout_seconds', 2);
+        $provisionTimeoutSeconds = max(0.05, (float) config('sql_proctor.sandbox.provision_timeout_seconds', 5));
 
         $provPdo = $this->connectProvisioner();
         $runnerPdo = null;
@@ -44,9 +46,9 @@ class SandboxManager
             $provPdo->exec("CREATE DATABASE `{$schema}` CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci");
             $provPdo->exec("USE `{$schema}`");
 
-            $this->applyProvisionerScript($provPdo, $schemaSql, $schema);
+            $this->applyProvisionerScript($provPdo, $schemaSql, $schema, $provisionTimeoutSeconds);
             if ($seedSql !== null && trim($seedSql) !== '') {
-                $this->applyProvisionerScript($provPdo, $seedSql, $schema);
+                $this->applyProvisionerScript($provPdo, $seedSql, $schema, $provisionTimeoutSeconds);
             }
 
             $provPdo->exec(sprintf(
@@ -60,6 +62,8 @@ class SandboxManager
 
             $runnerPdo = $this->connectRunner($schema);
             $runnerPdo->exec("SET SESSION max_statement_time = {$timeoutSeconds}");
+            $runnerPdo->exec('SET SESSION group_concat_max_len = 8192');
+            $runnerPdo->exec('SET SESSION max_session_mem_used = 16777216');
 
             $startedAt = hrtime(true);
             $result = $callback($runnerPdo, $schema);
@@ -72,6 +76,14 @@ class SandboxManager
             ];
         } catch (SandboxUnavailableException $e) {
             throw $e;
+        } catch (SandboxProvisioningException $e) {
+            $elapsedMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
+
+            return [
+                'status' => 'sql_error',
+                'errorMessage' => $e->getMessage(),
+                'executionMs' => $elapsedMs,
+            ];
         } catch (PDOException $e) {
             $elapsedMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
             if ($this->isConnectionFailure($e)) {
@@ -138,14 +150,15 @@ class SandboxManager
     {
         $schema = $this->generateSchemaName();
         $provPdo = $this->connectProvisioner();
+        $provisionTimeoutSeconds = max(0.05, (float) config('sql_proctor.sandbox.provision_timeout_seconds', 5));
 
         try {
             $provPdo->exec("CREATE DATABASE `{$schema}` CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci");
             $provPdo->exec("USE `{$schema}`");
 
-            $this->applyProvisionerScript($provPdo, $schemaSql, $schema);
+            $this->applyProvisionerScript($provPdo, $schemaSql, $schema, $provisionTimeoutSeconds);
             if ($seedSql !== null && trim($seedSql) !== '') {
-                $this->applyProvisionerScript($provPdo, $seedSql, $schema);
+                $this->applyProvisionerScript($provPdo, $seedSql, $schema, $provisionTimeoutSeconds);
             }
 
             return $callback($provPdo, $schema);
@@ -251,14 +264,15 @@ class SandboxManager
         }
     }
 
-    private function applyProvisionerScript(PDO $provPdo, string $sql, string $schema): void
+    private function applyProvisionerScript(PDO $provPdo, string $sql, string $schema, float $timeoutSeconds): void
     {
         $checked = $this->guard->validate($sql, QuestionType::SqlDdl, true);
         if (! $checked['ok']) {
-            throw new \RuntimeException((string) $checked['reason']);
+            throw new SandboxProvisioningException((string) $checked['reason']);
         }
 
         try {
+            $provPdo->exec("SET SESSION max_statement_time = {$timeoutSeconds}");
             foreach ($checked['statements'] as $statement) {
                 $provPdo->exec($statement);
             }
@@ -267,7 +281,19 @@ class SandboxManager
                 throw new SandboxUnavailableException;
             }
 
-            throw new \RuntimeException($this->sanitizeError($e, $schema));
+            if ($this->isTimeoutException($e)) {
+                throw new SandboxProvisioningException(
+                    'Sandbox setup SQL timed out after '.rtrim(rtrim(number_format($timeoutSeconds, 2, '.', ''), '0'), '.').' seconds.'
+                );
+            }
+
+            throw new SandboxProvisioningException($this->sanitizeError($e, $schema));
+        } finally {
+            try {
+                $provPdo->exec('SET SESSION max_statement_time = 0');
+            } catch (Throwable) {
+                // Connection may already be closed/reset.
+            }
         }
     }
 
@@ -283,7 +309,7 @@ class SandboxManager
 
     private function generateSchemaName(): string
     {
-        return config('sql_proctor.sandbox.prefix', 'sbx_').bin2hex(random_bytes(16));
+        return sprintf('%s%08x%s', config('sql_proctor.sandbox.prefix', 'sbx_'), time(), bin2hex(random_bytes(12)));
     }
 
     private function isConnectionFailure(PDOException $e): bool

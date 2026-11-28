@@ -31,7 +31,7 @@ class SqlExecutionService
 
         $followUpStatements = [];
         if ($followUpSql !== null && trim($followUpSql) !== '') {
-            $followCheck = $this->guard->validate($followUpSql, QuestionType::SqlDml);
+            $followCheck = $this->guard->validate($followUpSql, QuestionType::SqlDml, false, true);
             if (! $followCheck['ok']) {
                 return new ExecutionResult(
                     status: 'policy_blocked',
@@ -44,21 +44,30 @@ class SqlExecutionService
         $maxRows = (int) config('sql_proctor.sandbox.max_rows', 500);
         $maxCellBytes = (int) config('sql_proctor.sandbox.max_cell_bytes', 4096);
         $maxResultBytes = (int) config('sql_proctor.sandbox.max_result_bytes', 1048576);
+        $maxTotalSeconds = max(1.0, (float) config('sql_proctor.sandbox.max_total_execution_seconds', 12));
 
         $outcome = $this->sandboxManager->runInSandbox(
             $schemaSql,
             $seedSql,
             $type,
-            function (PDO $runnerPdo) use ($checked, $followUpStatements, $maxRows, $maxCellBytes, $maxResultBytes): ExecutionResult {
+            function (PDO $runnerPdo) use ($checked, $followUpStatements, $maxRows, $maxCellBytes, $maxResultBytes, $maxTotalSeconds): ExecutionResult {
                 $lastColumns = [];
                 $lastRows = [];
                 $lastRawRows = [];
                 $lastTruncated = false;
                 $totalAffected = 0;
+                $loopStartedAt = hrtime(true);
 
                 $allStatements = array_merge($checked['statements'], $followUpStatements);
 
-                foreach ($allStatements as $statement) {
+                foreach ($allStatements as $stmtIdx => $statement) {
+                    if ($stmtIdx > 0 && ((hrtime(true) - $loopStartedAt) / 1_000_000_000) >= $maxTotalSeconds) {
+                        return new ExecutionResult(
+                            status: 'timeout',
+                            errorMessage: 'Script execution exceeded the total execution time budget.',
+                        );
+                    }
+
                     $stmt = $runnerPdo->query($statement);
                     if ($stmt === false) {
                         continue;
@@ -110,8 +119,9 @@ class SqlExecutionService
                                 $raw[] = $normalized;
                                 $assoc[$uniqueKeys[$index]] = $normalized;
                             }
+                            $tuple = null;
 
-                            if ($bytesRead + $rowBytes > $maxResultBytes && count($rows) > 0) {
+                            if ($bytesRead + $rowBytes > $maxResultBytes) {
                                 $truncated = true;
                                 break;
                             }
@@ -154,13 +164,14 @@ class SqlExecutionService
         $result = $outcome['result'];
 
         return new ExecutionResult(
-            status: 'succeeded',
+            status: $result->status,
             columns: $result->columns,
             rows: $result->rows,
             rawRows: $result->rawRows,
             rowCount: $result->rowCount,
             truncated: $result->truncated,
             executionMs: $outcome['executionMs'],
+            errorMessage: $result->errorMessage,
             affectedRows: $result->affectedRows,
         );
     }
