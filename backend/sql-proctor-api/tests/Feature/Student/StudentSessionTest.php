@@ -194,6 +194,87 @@ class StudentSessionTest extends TestCase
         $this->assertSame(1, $classB->activeStudentSessions()->count());
     }
 
+    /** PR-3 NB-1 | FR-8 | negative duplicate protection during same-class rejoin */
+    public function test_student_with_cookie_cannot_claim_another_active_students_name_in_same_classroom(): void
+    {
+        $examiner = User::factory()->examiner()->create();
+        $classroom = Classroom::factory()->for($examiner, 'examiner')->create(['join_code' => 'SAME2345']);
+
+        $joinFirst = $this->postJson('/api/student/join', [
+            'display_name' => 'Alex Rivera',
+            'class_code' => 'SAME2345',
+        ])->assertStatus(201);
+
+        $joinSecond = $this->postJson('/api/student/join', [
+            'display_name' => 'Grace Hopper',
+            'class_code' => 'SAME2345',
+        ])->assertStatus(201);
+
+        $cookieSecond = $joinSecond->getCookie('student_session_id', false);
+        $this->assertNotNull($cookieSecond);
+
+        // Switching to a name already held by another active student still returns 409 and keeps own session intact.
+        $this->withCredentials()
+            ->withUnencryptedCookie('student_session_id', $cookieSecond->getValue())
+            ->postJson('/api/student/join', [
+                'display_name' => 'alex rivera',
+                'class_code' => 'SAME2345',
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'display_name_taken');
+
+        $this->assertNull(StudentSession::findOrFail($joinFirst->json('data.id'))->revoked_at);
+        $this->assertNull(StudentSession::findOrFail($joinSecond->json('data.id'))->revoked_at);
+    }
+
+    /** PR-3 NB-1 | FR-8 | self-rejoin superseding own active session */
+    public function test_rejoining_same_classroom_with_existing_cookie_supersedes_own_session(): void
+    {
+        $examiner = User::factory()->examiner()->create();
+        $classroom = Classroom::factory()->for($examiner, 'examiner')->create(['join_code' => 'SELF2345']);
+
+        $firstJoin = $this->postJson('/api/student/join', [
+            'display_name' => 'Grace Hopper',
+            'class_code' => 'SELF2345',
+        ])->assertStatus(201);
+
+        $firstCookie = $firstJoin->getCookie('student_session_id', false);
+        $this->assertNotNull($firstCookie);
+        $firstSessionId = $firstJoin->json('data.id');
+
+        $rejoin = $this->withCredentials()
+            ->withUnencryptedCookie('student_session_id', $firstCookie->getValue())
+            ->postJson('/api/student/join', [
+                'display_name' => '  grace   hopper ',
+                'class_code' => 'SELF2345',
+            ]);
+
+        $rejoin->assertStatus(201)
+            ->assertJsonPath('data.display_name', 'grace hopper')
+            ->assertJsonPath('data.classroom.id', $classroom->id);
+
+        $secondSessionId = $rejoin->json('data.id');
+        $this->assertNotSame($firstSessionId, $secondSessionId);
+        $this->assertNotNull(StudentSession::findOrFail($firstSessionId)->revoked_at);
+        $this->assertNull(StudentSession::findOrFail($secondSessionId)->revoked_at);
+        $this->assertSame(1, $classroom->activeStudentSessions()->count());
+
+        $this->assertDatabaseHas('audit_logs', [
+            'event_type' => 'student.left_class',
+            'actor_id' => $firstSessionId,
+            'target_id' => $classroom->id,
+        ]);
+
+        $secondCookie = $rejoin->getCookie('student_session_id', false);
+        $this->assertNotNull($secondCookie);
+
+        $this->withCredentials()
+            ->withUnencryptedCookie('student_session_id', $secondCookie->getValue())
+            ->getJson('/api/student/session')
+            ->assertOk()
+            ->assertJsonPath('data.id', $secondSessionId);
+    }
+
     /** TM-3, TM-27 | FR-8, FR-9, NFR-3 | end-to-end CSRF flow */
     public function test_student_csrf_flow_works_with_csrf_validation_enabled(): void
     {
