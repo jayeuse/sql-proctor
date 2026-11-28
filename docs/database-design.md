@@ -1,51 +1,51 @@
 # SQL-Proctor Database Design
 
-> Status: Current for the schema created on 2026-11-19. Exam tables and the MariaDB execution schema are not built.
+> Status: Updated for SPEC-0004 (Authentication, Authorization, Classrooms, Student Sessions, and Audit Logging) on 2026-11-28. Exam task/attempt tables and the MariaDB execution schema are not built yet.
 
 SQL-Proctor uses two databases with different jobs:
 
 | Database | Engine | Role | Application data |
 |---|---|---|---|
-| `sql_proctor` | PostgreSQL 17.12 | Application database | Yes |
+| `sql_proctor` (and `sql_proctor_test`) | PostgreSQL 17.12 | Application database | Yes |
 | `sql_exec` | MariaDB 11.8.9 | Student SQL query execution | No |
 
-The separation is a hard rule. It is recorded as DEC-0042 in the company workspace, with approval record APR-0013. A student query must never run with access to application tables.
+The separation is a hard rule (`AGENTS.md`, [ADR-0002](adr/0002-auth-session-boundaries-and-audit-isolation.md)). A student query must never run with access to application or audit tables.
 
 ## PostgreSQL: `sql_proctor`
 
-Connection: `127.0.0.1:5432`, user `sql_proctor`, from `backend/sql-proctor-api/.env`. Only the Laravel API connects.
+Connection: `127.0.0.1:5432`, user `sql_proctor`, from `backend/sql-proctor-api/.env` (and `sql_proctor_test` via `phpunit.xml`). Only the Laravel API connects.
 
-### Tables that exist
+### Tables
 
-| Table | Purpose | Key columns |
+| Table | Purpose | Key columns & constraints |
 |---|---|---|
-| `users` | Application accounts | `id`, `name`, `email` (unique), `email_verified_at`, `password`, `remember_token`, timestamps |
-| `password_reset_tokens` | Password reset requests | `email` (primary), `token`, `created_at` |
-| `sessions` | Database session store | `id` (primary), `user_id`, `ip_address`, `user_agent`, `payload`, `last_activity` |
-| `personal_access_tokens` | Sanctum API tokens (polymorphic) | `id`, `tokenable_type`, `tokenable_id`, `name`, `token` (unique hash), `abilities`, `last_used_at`, `expires_at` |
-| `cache`, `cache_locks` | Database cache store | `key` (primary), `value`, `expiration`; lock `owner` |
+| `users` | Staff accounts (`admin`, `examiner`) | `id` (bigint PK), `username` (varchar(64) unique, lowercase `CHECK`), `name` (nullable), `email` (nullable unique), `email_verified_at`, `password`, `role` (`'admin' \| 'examiner'`, indexed, `CHECK`), `is_active` (boolean default `true`, indexed), `last_login_at` (nullable timestamp), `remember_token`, timestamps |
+| `classrooms` | Examiner-managed class entry codes | `id` (uuid PK), `examiner_id` (FK -> `users.id`, restrict delete, indexed), `name` (varchar(120)), `join_code` (varchar(16) unique), `is_open` (boolean default `true`), `code_expires_at` (nullable timestamp), timestamps; index `(is_open, code_expires_at)` |
+| `student_sessions` | Kahoot-style student sessions (no `users` row) | `id` (uuid PK), `classroom_id` (FK -> `classrooms.id`, cascade delete), `display_name` (varchar(64)), `normalized_display_name` (varchar(64)), `ip_address` (`inet` nullable), `user_agent` (`text` nullable), `joined_at` (timestamp), `last_seen_at` (timestamp), `expires_at` (timestamp), `revoked_at` (nullable timestamp); partial unique index `(classroom_id, normalized_display_name) WHERE revoked_at IS NULL`; index `(classroom_id, expires_at)` |
+| `audit_logs` | Immutable append-only security & domain audit log | `id` (uuid PK), `actor_type` (`admin \| examiner \| student \| system \| anonymous`), `actor_id` (varchar(64) nullable), `actor_label` (varchar(120) nullable), `event_type` (varchar(80)), `target_type` (varchar(64) nullable), `target_id` (varchar(64) nullable), `metadata` (`jsonb` default `'{}'`), `ip_address` (`inet` nullable), `user_agent` (`text` nullable), `request_id` (`uuid` nullable), `created_at` (timestamp, no `updated_at`); indexes `(actor_type, actor_id, created_at)`, `(event_type, created_at)`, `(target_type, target_id)`, `(created_at)`; PostgreSQL `BEFORE UPDATE OR DELETE` trigger `audit_logs_prevent_update_delete` |
+| `password_reset_tokens` | Laravel default password reset table (unused in Phase 1) | `email` (primary), `token`, `created_at` |
+| `sessions` | Database session store for staff (`web` guard) | `id` (primary), `user_id` (indexed), `ip_address`, `user_agent`, `payload`, `last_activity` |
+| `personal_access_tokens` | Sanctum API tokens (polymorphic; unused for SPA cookie login) | `id`, `tokenable_type`, `tokenable_id`, `name`, `token` (unique hash), `abilities`, `last_used_at`, `expires_at` |
+| `cache`, `cache_locks` | Database cache & rate-limit store | `key` (primary), `value`, `expiration`; lock `owner` |
 | `jobs`, `job_batches`, `failed_jobs` | Database queue tables | Standard Laravel queue columns |
 | `migrations` | Migration history | `id`, `migration`, `batch` |
 
-`users`, `password_reset_tokens`, and `sessions` come from `0001_01_01_000000_create_users_table`. The cache and queue tables come from the next two default migrations. `personal_access_tokens` comes from Laravel Sanctum.
+### Relationships & integrity rules
 
-### Relationships
-
-- `personal_access_tokens.tokenable_type` + `tokenable_id` point to `users.id` for user tokens. The relation is polymorphic.
-- `sessions.user_id` references `users.id` logically. The default migration does not add a foreign key.
-- `password_reset_tokens.email` matches `users.email`. It has no foreign key.
+- `classrooms.examiner_id` references `users.id` (`ON DELETE RESTRICT`). Staff accounts are deactivated (`is_active = false`), not deleted.
+- `student_sessions.classroom_id` references `classrooms.id` (`ON DELETE CASCADE`). Active display names are unique case-insensitively per classroom (`WHERE revoked_at IS NULL`).
+- `audit_logs` has no foreign keys to `users`, `classrooms`, or `student_sessions` so historical snapshots (`actor_label`, `actor_id`, `target_id`) survive independently and `audit_logs` stays strictly append-only.
+- `audit_logs` enforces append-only integrity via both Eloquent model hooks and the PostgreSQL `prevent_audit_logs_mutation()` trigger on `BEFORE UPDATE OR DELETE`.
+- `sessions.user_id` is purged immediately when an admin deactivates an examiner or resets an examiner's password.
 
 ### Not built
 
-The exam domain has no tables yet. Each area is `TBD` until a feature task defines it:
+The exam domain tables remain `TBD` until later feature phases:
 
-- Exam definition, sections, questions, and answer options.
-- Student attempts, answers, and timing.
-- SQL tasks, expected results, and grading rules.
-- Results, scores, and audit history.
-- Role and permission storage beyond Laravel's default `users` table.
+- Exam definitions, sections, questions, and expected results.
+- Student exam attempts, SQL submissions, and grading scores.
 
-Do not add a table to MariaDB for any of these. They belong in PostgreSQL.
+Do not add any of these tables or `audit_logs` to MariaDB. They belong exclusively in PostgreSQL.
 
 ### Commands
 
@@ -54,10 +54,9 @@ Run from `backend/sql-proctor-api/` with `PATH="/opt/homebrew/bin:$PATH"`:
 ```sh
 php artisan migrate            # apply pending migrations
 php artisan migrate:status     # show applied migrations
-php artisan migrate:fresh      # DESTRUCTIVE: drop all tables and re-migrate
+php artisan app:bootstrap-admin # create initial active admin idempotently
+php artisan migrate:fresh      # DESTRUCTIVE: drop all tables and re-migrate (local only)
 ```
-
-`migrate:fresh` and `migrate:rollback` destroy application data. Treat them as destructive and use them only on local data.
 
 ## MariaDB: `sql_exec`
 
@@ -65,27 +64,17 @@ Connection: `127.0.0.1:3306`, database `sql_exec`, application user `sql_runner`
 
 ### Tables that exist
 
-None. The database is created empty by the container on its first start. The image has never started on this machine because XAMPP MySQL holds the host port.
+None. MariaDB is untouched in Phase 1 and stores no application, authentication, session, or audit data.
 
 ### Purpose and constraints
 
-MariaDB runs the SQL that a student writes during an exam. It is not an application store. The following are design constraints, not built behavior:
+MariaDB runs student exam SQL in a later phase (`sql-execution-isolation` gate):
 
-1. A student query must run in an isolated scope. The isolation mechanism is `TBD`. Options are one schema per attempt, one database per attempt, or a restricted server instance. The choice needs a technical design and the Human Owner's approval because it changes a schema and access boundary.
-2. The execution user must have only the privileges the queries need. Whether that is read-only, read-write on a disposable schema, or limited DDL is `TBD`.
-3. Each attempt needs a deterministic setup and cleanup. The seed data source and the cleanup trigger are `TBD`.
-4. Query time and result size must be bounded. The limits are `TBD`.
-5. MariaDB must never receive application credentials, application tables, or copies of application data.
-
-### Commands
-
-From `infra/`:
-
-```sh
-docker compose exec mariadb sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"'
-```
-
-The container expands the variables. Do not print the password. A host client can connect to `127.0.0.1:3306` when the port is published and XAMPP MySQL is not using it.
+1. A student query must run in an isolated scope (`TBD` pending technical design and Human Owner approval).
+2. Least-privilege execution user (`TBD`).
+3. Deterministic setup and cleanup (`TBD`).
+4. Bounded time, rows, and connections (`TBD`).
+5. MariaDB must never receive application credentials, application tables, student session data, or `audit_logs`.
 
 ## Storage and lifecycle
 
@@ -102,4 +91,6 @@ The container expands the variables. Do not print the password. A host client ca
 
 - [architecture.md](architecture.md)
 - [api-specification.md](api-specification.md)
+- [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md)
+- [ADR-0002](adr/0002-auth-session-boundaries-and-audit-isolation.md)
 - `infra/README.md`

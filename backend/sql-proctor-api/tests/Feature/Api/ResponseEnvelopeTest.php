@@ -4,12 +4,15 @@ namespace Tests\Feature\Api;
 
 use App\Http\Support\ApiResponse;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 class ResponseEnvelopeTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_error_helper_returns_non_2xx_json_with_optional_code_and_headers(): void
     {
         Route::middleware('api')->get('/api/_test/error-helper', fn () => ApiResponse::error(
@@ -65,10 +68,9 @@ class ResponseEnvelopeTest extends TestCase
 
     public function test_existing_user_route_returns_resource_data_envelope(): void
     {
-        $user = User::factory()->make([
-            'id' => 1,
+        $user = User::factory()->create([
             'name' => 'Jane Doe',
-            'email' => 'jane@example.com',
+            'username' => 'jane_doe',
         ]);
 
         $response = $this->actingAs($user, 'sanctum')->getJson('/api/user');

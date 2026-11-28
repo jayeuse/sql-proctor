@@ -1,8 +1,8 @@
 # SQL-Proctor Development Roadmap
 
-> Status: Proposed. Only Phase 0 is complete and verified. The Human Owner has not approved any later phase, date, or scope. Feature items are `TBD`.
+> Status: Phase 0 is verified except the MariaDB host port check. Phase 1 is complete and verified against [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md). Phases 2 through 5 are `Proposed` and await Human Owner approval.
 
-The Human Owner defined the product as a web-based SQL practical examination system and fixed the stack. This roadmap gives the order of work. It does not authorize any phase.
+The Human Owner defined the product as a web-based SQL practical examination system and fixed the stack. This roadmap gives the order of work. It does not authorize any unapproved phase.
 
 ## Phase 0: Development environment
 
@@ -28,15 +28,25 @@ Exit criteria:
 
 ## Phase 1: Accounts and authentication
 
-**Status: Proposed.**
+**Status: Complete and verified (2026-11-28).**
 
-Outcome: a person can create an account, sign in, sign out, and call a protected endpoint.
+Outcome: an administrator, examiner, and student authenticate through role-separated flows, and security actions write to an immutable audit log.
 
-Scope to define: registration policy (open, invited, or administrator-created), email verification, password reset, and token lifetime. These are `TBD`.
+Delivered under [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md) and [ADR-0002](adr/0002-auth-session-boundaries-and-audit-isolation.md):
 
-Exit criteria to define: an end-to-end sign-in test against PostgreSQL, token revocation, and rate limiting on the sign-in route.
+- Idempotent `php artisan app:bootstrap-admin` command for the first active administrator account.
+- Sanctum SPA session authentication (`/api/auth/login`, `/api/auth/logout`, `/api/user`), `last_login_at` tracking, active-user enforcement, and rate limiting.
+- Administrator endpoints and `/admin` UI for examiner CRUD, enable/disable toggles, and filterable audit logs.
+- Examiner endpoints and `/examiner` UI for classrooms, class-code generation and rotation, class status (`open`/`closed`), and student session revocation.
+- Kahoot-style student entry (`/api/student/join`, `/api/student/session`, `/api/student/leave`) on `/join` and `/student` using HTTP-only `student_session_id` cookies.
+- Append-only `audit_logs` PostgreSQL table protected by a `BEFORE UPDATE OR DELETE` trigger and centralized secret redaction.
+- Next.js 16 App Router pages styled with Tailwind CSS v4, Vitest component tests, Playwright Chromium E2E tests, and GitHub Actions CI.
 
-Not started. Needs accepted criteria and a feature task.
+Exit criteria verified:
+
+1. Backend Pint formatting and 100 PostgreSQL PHPUnit feature/integration tests pass.
+2. Frontend ESLint, Next.js production build, 20 Vitest tests, and 11 Chromium Playwright E2E journeys pass.
+3. Unauthenticated and cross-role access return `401` and `403`, and `audit_logs` rejects direct `UPDATE`/`DELETE`.
 
 ## Phase 2: Exam authoring
 
@@ -96,10 +106,10 @@ Not started.
 4. Every phase starts with accepted criteria and one feature task.
 5. Dates are not set. The Human Owner sets them when a phase is approved.
 
-## Known gaps at the end of Phase 0
+## Known gaps
 
-- MariaDB host port 3306 conflicts with XAMPP MySQL. Stop XAMPP MySQL or set `MARIADB_PORT`.
-- No frontend test runner. `Vitest` is listed in the stack but not installed.
-- No CI pipeline.
-- Two low-severity `dompurify` advisories arrive through `monaco-editor`. Monaco is installed but not used yet. Review before the editor feature starts.
-- The Laravel skeleton's `backend/sql-proctor-api/AGENTS.md` asks agents to install Laravel Boost. That was not done, because this setup did not authorize the extra package.
+- MariaDB host port 3306 conflicts with XAMPP MySQL when XAMPP MySQL runs. Stop XAMPP MySQL or set `MARIADB_PORT` before Phase 3 verification.
+- Two low-severity `dompurify` advisories (`<=3.4.16`) arrive through `monaco-editor`. Monaco is installed and unused until Phase 3; review before exam execution starts.
+- Five pre-existing Symfony advisories appear in `composer audit` (observed 2026-11-25).
+- Frontend tests (`Vitest`, `React Testing Library`, `Playwright`) and GitHub Actions CI (`.github/workflows/ci.yml`) were added in Phase 1.
+- The Laravel skeleton's `backend/sql-proctor-api/AGENTS.md` asks agents to install Laravel Boost, which stays outside the approved setup.

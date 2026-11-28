@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -25,21 +26,36 @@ class UserFactory extends Factory
     public function definition(): array
     {
         return [
+            'username' => Str::lower(fake()->unique()->bothify('user_????####')),
             'name' => fake()->name(),
-            'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'email' => null,
+            'email_verified_at' => null,
+            'password' => static::$password ??= Hash::make('StrongPassword123!'),
+            'role' => UserRole::Examiner,
+            'is_active' => true,
+            'last_login_at' => null,
             'remember_token' => Str::random(10),
         ];
     }
 
-    /**
-     * Indicate that the model's email address should be unverified.
-     */
-    public function unverified(): static
+    public function admin(): static
     {
-        return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
+        return $this->state(fn () => [
+            'role' => UserRole::Admin,
+        ]);
+    }
+
+    public function examiner(): static
+    {
+        return $this->state(fn () => [
+            'role' => UserRole::Examiner,
+        ]);
+    }
+
+    public function inactive(): static
+    {
+        return $this->state(fn () => [
+            'is_active' => false,
         ]);
     }
 }

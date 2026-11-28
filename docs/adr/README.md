@@ -23,3 +23,4 @@ This folder holds the architecture decisions that later work must follow. Each d
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [ADR-0001](0001-agent-skills-in-dot-agents.md) | Agent skills use the discovery-first `.agents/skills` layout | Accepted | 2026-11-19 |
+| [ADR-0002](0002-auth-session-boundaries-and-audit-isolation.md) | Dual Session Authentication Boundaries and Append-Only PostgreSQL Audit Logging | Accepted | 2026-11-28 |
