@@ -2,6 +2,9 @@
 
 use App\Exceptions\ApiException;
 use App\Http\Middleware\AssignRequestId;
+use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\VerifyStudentSession;
 use App\Http\Support\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -29,6 +32,11 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prepend(AssignRequestId::class);
         $middleware->statefulApi();
+        $middleware->alias([
+            'active' => EnsureUserIsActive::class,
+            'role' => EnsureRole::class,
+            'student.session' => VerifyStudentSession::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
@@ -76,6 +84,21 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             if ($e instanceof AuthorizationException || $e instanceof AccessDeniedHttpException) {
+                $authException = $e instanceof AuthorizationException
+                    ? $e
+                    : ($e->getPrevious() instanceof AuthorizationException ? $e->getPrevious() : null);
+
+                $policyResponse = $authException?->response();
+                $policyCode = $policyResponse?->code();
+
+                if (is_string($policyCode) && $policyCode !== '') {
+                    return $withRequestId(ApiResponse::error(
+                        $policyResponse->message() ?? 'This action is unauthorized.',
+                        403,
+                        $policyCode,
+                    ));
+                }
+
                 return $withRequestId(ApiResponse::error('This action is unauthorized.', 403));
             }
 
