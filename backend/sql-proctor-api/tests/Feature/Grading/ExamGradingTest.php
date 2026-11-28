@@ -3,16 +3,21 @@
 namespace Tests\Feature\Grading;
 
 use App\Enums\QuestionType;
+use App\Models\AttemptAnswer;
 use App\Models\Classroom;
 use App\Models\ClassroomExam;
 use App\Models\Exam;
 use App\Models\ExamAttempt;
 use App\Models\ExamQuestion;
+use App\Models\ExamVersion;
 use App\Models\QuestionTestCase;
 use App\Models\SqlDataset;
+use App\Models\StudentSession;
 use App\Models\User;
+use App\Services\Grading\ExamGradingService;
 use App\Services\Grading\ResultSetComparator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
@@ -321,5 +326,138 @@ class ExamGradingTest extends TestCase
             'qDdl' => $qDdl,
             'qShort' => $qShort,
         ];
+    }
+
+    /** PR#4 Blocking #1, Codex P1, & Medium | defense-in-depth DML assertion guard, truncated result fail-closed, in_progress grade guard */
+    public function test_grading_fails_closed_for_dml_missing_assertion_and_truncated_results_and_blocks_in_progress_grade(): void
+    {
+        $examiner = User::factory()->examiner()->create();
+        $exam = Exam::factory()->for($examiner, 'examiner')->create(['status' => 'published', 'current_version_number' => 1]);
+        $qDmlId = (string) Str::uuid();
+        $qTruncId = (string) Str::uuid();
+
+        $seqSql = <<<'SQL'
+WITH RECURSIVE seq AS (
+    SELECT 1 AS n
+    UNION ALL
+    SELECT n + 1 FROM seq WHERE n < 550
+)
+SELECT n FROM seq
+SQL;
+        $studentBigSql = <<<'SQL'
+WITH RECURSIVE seq AS (
+    SELECT 1 AS n
+    UNION ALL
+    SELECT n + 1 FROM seq WHERE n < 600
+)
+SELECT n FROM seq
+SQL;
+
+        $version = ExamVersion::create([
+            'exam_id' => $exam->id,
+            'version_number' => 1,
+            'published_by' => $examiner->id,
+            'published_at' => now(),
+            'snapshot' => [
+                'exam_id' => $exam->id,
+                'title' => 'Defense Check Exam',
+                'duration_minutes' => 60,
+                'passing_score_percent' => 60,
+                'total_points' => 20,
+                'settings' => ['allow_query_preview' => true],
+                'dataset' => [
+                    'schema_sql' => 'CREATE TABLE employees (id INT PRIMARY KEY, dept VARCHAR(40));',
+                    'seed_sql' => "INSERT INTO employees VALUES (1, 'Eng');",
+                ],
+                'questions' => [
+                    [
+                        'id' => $qDmlId,
+                        'position' => 1,
+                        'question_type' => 'sql_dml',
+                        'grading_mode' => 'auto',
+                        'title' => 'DML missing assertion',
+                        'prompt' => 'Update row 1',
+                        'points' => 10,
+                        'reference_sql' => "UPDATE employees SET dept = 'Ops' WHERE id = 1;",
+                        'comparison_config' => [],
+                        'test_cases' => [
+                            [
+                                'id' => (string) Str::uuid(),
+                                'name' => 'No assertion',
+                                'weight_points' => 10,
+                                'is_hidden' => false,
+                                'override_seed_sql' => null,
+                                'assertion_sql' => null,
+                                'expected_behavior' => 'match_reference',
+                            ],
+                        ],
+                    ],
+                    [
+                        'id' => $qTruncId,
+                        'position' => 2,
+                        'question_type' => 'sql_select',
+                        'grading_mode' => 'auto',
+                        'title' => 'Truncated prefix check',
+                        'prompt' => 'Return sequence',
+                        'points' => 10,
+                        'reference_sql' => $seqSql,
+                        'comparison_config' => [],
+                        'test_cases' => [],
+                    ],
+                ],
+            ],
+        ]);
+
+        $classroom = Classroom::factory()->for($examiner, 'examiner')->create(['is_open' => true]);
+        $ce = ClassroomExam::factory()->for($classroom)->for($exam)->for($version, 'examVersion')->for($examiner, 'assigner')->create();
+        $session = StudentSession::factory()->for($classroom)->create();
+
+        $attempt = ExamAttempt::create([
+            'classroom_exam_id' => $ce->id,
+            'exam_version_id' => $version->id,
+            'student_session_id' => $session->id,
+            'status' => 'in_progress',
+            'grading_status' => 'pending',
+            'started_at' => now(),
+            'expires_at' => now()->addHour(),
+            'question_order' => [$qDmlId, $qTruncId],
+            'max_score' => 20,
+        ]);
+
+        $ansDml = AttemptAnswer::create([
+            'attempt_id' => $attempt->id,
+            'question_id' => $qDmlId,
+            'submitted_sql' => 'UPDATE employees SET dept = dept WHERE 1 = 0;',
+            'max_points' => 10,
+            'grading_status' => 'unanswered',
+            'final_score' => 0,
+            'test_results' => [],
+        ]);
+        AttemptAnswer::create([
+            'attempt_id' => $attempt->id,
+            'question_id' => $qTruncId,
+            'submitted_sql' => $studentBigSql,
+            'max_points' => 10,
+            'grading_status' => 'unanswered',
+            'final_score' => 0,
+            'test_results' => [],
+        ]);
+
+        // Grading in_progress attempt via API must return 409 attempt_still_in_progress
+        $this->actingAs($examiner, 'sanctum')
+            ->patchJson("/api/examiner/attempts/{$attempt->id}/answers/{$ansDml->id}/grade", [
+                'manual_score' => 5,
+                'override_reason' => 'Too early',
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'attempt_still_in_progress');
+
+        $attempt->forceFill(['status' => 'submitted', 'submitted_at' => now()])->save();
+        $graded = app(ExamGradingService::class)->gradeAttempt($attempt);
+
+        $this->assertSame('0.00', $graded->answers->firstWhere('question_id', $qDmlId)->auto_score);
+        $truncAns = $graded->answers->firstWhere('question_id', $qTruncId);
+        $this->assertSame('0.00', $truncAns->auto_score);
+        $this->assertStringContainsString('truncated', strtolower((string) ($truncAns->test_results[0]['message'] ?? '')));
     }
 }

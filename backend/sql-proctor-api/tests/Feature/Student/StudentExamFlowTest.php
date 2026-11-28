@@ -382,6 +382,12 @@ class StudentExamFlowTest extends TestCase
             ->assertStatus(201)
             ->json('data.id');
 
+        $this->withStudentCookie($cookie2)
+            ->putJson("/api/student/attempts/{$attempt2Id}/answers/{$qSql->id}", [
+                'submitted_sql' => 'SELECT name FROM employees ORDER BY id',
+            ])
+            ->assertOk();
+
         $this->actingAs($examiner, 'sanctum')
             ->postJson("/api/examiner/exams/{$exam->id}/unpublish", ['force_close_active' => true])
             ->assertOk();
@@ -554,6 +560,70 @@ class StudentExamFlowTest extends TestCase
             'optCorrect' => $optCorrect,
             'cookie' => $join->getCookie('student_session_id', false)->getValue(),
         ];
+    }
+
+    /** PR#4 Blocking #3 | Two-phase commit durably persists submitted/force_closed state even when MariaDB is down */
+    public function test_submit_and_force_unpublish_commit_durably_when_mariadb_is_unavailable(): void
+    {
+        ['exam' => $exam, 'cookie' => $cookie1, 'classroom' => $classroom, 'classroomExam' => $classroomExam, 'qSql' => $qSql] =
+            $this->seedAssignedExamScenario();
+
+        $attempt1Id = $this->withStudentCookie($cookie1)
+            ->postJson("/api/student/exams/{$classroomExam->id}/start")
+            ->assertStatus(201)
+            ->json('data.id');
+
+        $this->withStudentCookie($cookie1)
+            ->putJson("/api/student/attempts/{$attempt1Id}/answers/{$qSql->id}", [
+                'submitted_sql' => 'SELECT name FROM employees ORDER BY id',
+            ])
+            ->assertOk();
+
+        $join2 = $this->withUnencryptedCookie('student_session_id', '')
+            ->postJson('/api/student/join', [
+                'display_name' => 'Student Outage Two',
+                'class_code' => $classroom->join_code,
+            ])->assertStatus(201);
+        $cookie2 = $join2->getCookie('student_session_id', false)->getValue();
+        $attempt2Id = $this->withStudentCookie($cookie2)
+            ->postJson("/api/student/exams/{$classroomExam->id}/start")
+            ->assertStatus(201)
+            ->json('data.id');
+
+        $this->withStudentCookie($cookie2)
+            ->putJson("/api/student/attempts/{$attempt2Id}/answers/{$qSql->id}", [
+                'submitted_sql' => 'SELECT name FROM employees ORDER BY id',
+            ])
+            ->assertOk();
+
+        config(['database.connections.mariadb_provisioner.port' => '39999']);
+        config(['database.connections.mariadb_runner.port' => '39999']);
+        DB::purge('mariadb_provisioner');
+        DB::purge('mariadb_runner');
+
+        try {
+            $this->withStudentCookie($cookie1)
+                ->postJson("/api/student/attempts/{$attempt1Id}/submit")
+                ->assertOk()
+                ->assertJsonPath('data.status', 'submitted')
+                ->assertJsonPath('data.grading_status', 'pending');
+
+            $admin = User::factory()->admin()->create();
+            $this->actingAs($admin, 'sanctum')
+                ->postJson("/api/admin/exams/{$exam->id}/force-unpublish", [
+                    'reason' => 'Emergency outage test',
+                    'force_close_active' => true,
+                ])
+                ->assertOk()
+                ->assertJsonPath('data.status', 'unpublished');
+
+            $attempt2 = ExamAttempt::findOrFail($attempt2Id);
+            $this->assertSame('force_closed', $attempt2->status->value);
+            $this->assertSame('pending', $attempt2->grading_status->value);
+        } finally {
+            DB::purge('mariadb_provisioner');
+            DB::purge('mariadb_runner');
+        }
     }
 
     private function withStudentCookie(string $cookieValue): self

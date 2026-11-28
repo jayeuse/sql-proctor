@@ -7,6 +7,7 @@ use App\Exceptions\SandboxUnavailableException;
 use App\Services\SqlExecution\SandboxManager;
 use App\Services\SqlExecution\SchemaIntrospector;
 use App\Services\SqlExecution\SqlExecutionService;
+use App\Services\SqlExecution\SqlGuard;
 use Illuminate\Support\Facades\DB;
 use PDO;
 use Pdo\Mysql;
@@ -48,6 +49,17 @@ class MariaDbSandboxIsolationTest extends TestCase
             'SELECT * FROM sbx_00000000000000000000000000000000.students',
             'SELECT 1; DROP TABLE students',
             'SELECT BENCHMARK(10000000, SHA1("a"))',
+            // PR#4 Blocking #2: metadata & cross-sandbox introspection functions/views blocked for student queries
+            'SELECT DATABASE()',
+            'SELECT SCHEMA()',
+            'SELECT USER()',
+            'SELECT CURRENT_USER()',
+            'SELECT CURRENT_USER',
+            'SELECT VERSION()',
+            'SELECT @@datadir',
+            'SELECT @@version',
+            'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA',
+            'SELECT TABLE_SCHEMA, TABLE_NAME FROM `information_schema`.`VIEWS`',
         ];
 
         foreach ($hostileQueries as $sql) {
@@ -195,6 +207,13 @@ SQL;
         $this->assertSame(500, $capped->rowCount);
         $this->assertTrue($capped->truncated);
         $this->assertLessThanOrEqual(4120, strlen((string) $capped->rows[0]['long_text']));
+
+        // Oversized single cell stops at MariaDB packet cap without allocating 15 MB in PHP
+        $beforeMem = memory_get_usage(true);
+        $oversizedCell = $service->execute($schemaSql, '', "SELECT REPEAT('x', 15000000) AS big", QuestionType::SqlSelect);
+        $memDelta = memory_get_usage(true) - $beforeMem;
+        $this->assertLessThanOrEqual(4096, strlen((string) ($oversizedCell->rows[0]['big'] ?? '')));
+        $this->assertLessThan(2 * 1024 * 1024, $memDelta);
     }
 
     /** TM-13 | FR-5, NFR-3 | timeout */
@@ -267,6 +286,57 @@ SQL;
         $remaining = $provisioner->query("SHOW DATABASES LIKE 'sbx_%'")->fetchAll(PDO::FETCH_COLUMN);
         $this->assertNotContains($orphanSchema, $remaining);
         $this->assertArrayNotHasKey($orphanSchema, app(SandboxManager::class)->listRunnerSchemaPrivileges());
+    }
+
+    /** PR#4 Blocking #2, Codex P1, & Non-Blocking High | trusted assertion exemption, provisioner timeout, and timestamp-aware cleanup */
+    public function test_trusted_assertion_bypass_provisioner_timeout_and_empty_schema_age_preservation(): void
+    {
+        // Trusted assertion_sql still permits information_schema + DATABASE()
+        $guardCheck = app(SqlGuard::class)->validate(
+            "SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'tags'",
+            QuestionType::SqlDml,
+            false,
+            true,
+        );
+        $this->assertTrue($guardCheck['ok']);
+
+        // Provisioner scripts obey timeout cap instead of hanging indefinitely
+        config(['sql_proctor.sandbox.provision_timeout_seconds' => 0.15]);
+        $slowSeed = <<<'SQL'
+INSERT INTO items SELECT a.n FROM (
+    WITH RECURSIVE seq AS (
+        SELECT 1 AS n UNION ALL SELECT n + 1 FROM seq WHERE n < 2000000
+    ) SELECT n FROM seq
+) a;
+SQL;
+        $timedOut = app(SqlExecutionService::class)->execute(
+            schemaSql: 'CREATE TABLE items (id INT);',
+            seedSql: $slowSeed,
+            sql: 'SELECT COUNT(*) FROM items',
+            questionType: QuestionType::SqlSelect,
+        );
+        $this->assertSame('sql_error', $timedOut->status);
+        $this->assertStringContainsString('timed out', strtolower((string) $timedOut->errorMessage));
+
+        // Cleanup preserves fresh empty schema (<5m) while dropping old timestamped empty schema (>5m)
+        $provisioner = DB::connection('mariadb_provisioner')->getPdo();
+        $freshEmpty = sprintf('sbx_%08x%s', time(), bin2hex(random_bytes(12)));
+        $oldEmpty = sprintf('sbx_%08x%s', time() - 600, bin2hex(random_bytes(12)));
+
+        try {
+            $provisioner->exec("CREATE DATABASE `{$freshEmpty}`");
+            $provisioner->exec("CREATE DATABASE `{$oldEmpty}`");
+
+            $this->artisan('sandbox:cleanup-orphans', ['--older-than-minutes' => 5])
+                ->assertExitCode(0);
+
+            $remaining = $provisioner->query("SHOW DATABASES LIKE 'sbx_%'")->fetchAll(PDO::FETCH_COLUMN);
+            $this->assertContains($freshEmpty, $remaining);
+            $this->assertNotContains($oldEmpty, $remaining);
+        } finally {
+            $provisioner->exec("DROP DATABASE IF EXISTS `{$freshEmpty}`");
+            $provisioner->exec("DROP DATABASE IF EXISTS `{$oldEmpty}`");
+        }
     }
 
     /** TM-16 | FR-1 | normal behavior */

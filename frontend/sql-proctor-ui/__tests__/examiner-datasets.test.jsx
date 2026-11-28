@@ -45,6 +45,26 @@ describe("DatasetsManager", () => {
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"));
   });
 
+  it("uses /admin/datasets endpoints when signed in as an admin", async () => {
+    let hitExaminer = false;
+    server.use(
+      http.get(`${API}/user`, () =>
+        HttpResponse.json({ data: { id: 1, username: "admin", role: "admin" } }),
+      ),
+      http.get(`${API}/examiner/datasets`, () => {
+        hitExaminer = true;
+        return HttpResponse.json({ message: "Forbidden" }, { status: 403 });
+      }),
+      http.get(`${API}/admin/datasets`, () =>
+        HttpResponse.json({ data: [sampleDataset], meta: { current_page: 1, last_page: 1, per_page: 15, total: 1 } }),
+      ),
+    );
+
+    render(<DatasetsManager />);
+    expect(await screen.findByRole("button", { name: /University Store/i })).toBeVisible();
+    expect(hitExaminer).toBe(false);
+  });
+
   it("renders sanitized MariaDB validation error (422) when schema validation fails", async () => {
     const user = userEvent.setup();
     server.use(

@@ -247,7 +247,7 @@ describe("StudentExamWorkspace", () => {
     expect(screen.getByText(/Query succeeded/i)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /Save Draft/i }));
-    expect(await screen.findByText(/Draft saved/i)).toBeVisible();
+    expect(await screen.findByText("Draft saved.")).toBeVisible();
     expect(putPayloads.at(-1)).toEqual({
       questionId: "q-1",
       body: { submitted_sql: "SELECT id FROM products;", submit_answer: false },
@@ -344,13 +344,80 @@ describe("StudentExamWorkspace", () => {
     await user.click(screen.getByRole("button", { name: /Q2/i }));
     await user.click(await screen.findByLabelText("IS NULL"));
     await user.click(screen.getByRole("button", { name: /Save Draft/i }));
-    expect(await screen.findByText(/Draft saved/i)).toBeVisible();
+    expect(await screen.findByText("Draft saved.")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /^Submit Exam$/i }));
     await user.click(screen.getByRole("button", { name: /^Confirm Submit$/i }));
 
     await waitFor(() => expect(submitted).toBe(true));
     expect(pushMock).toHaveBeenCalledWith("/student/exams/att-1/result");
+  });
+
+  it("flushes dirty answers across fast question switching and before Submit Exam without dropping edits", async () => {
+    const user = userEvent.setup();
+    const putOrder = [];
+    let submitCalled = false;
+
+    server.use(
+      http.get(`${API}/student/attempts/att-1`, () => HttpResponse.json({ data: sampleAttempt })),
+      http.put(`${API}/student/attempts/att-1/answers/:qId`, async ({ params, request }) => {
+        const body = await request.json();
+        putOrder.push({ qId: params.qId, body });
+        return HttpResponse.json({
+          data: { question_id: params.qId, is_submitted: false, updated_at: "2026-11-28T05:12:00Z" },
+        });
+      }),
+      http.post(`${API}/student/attempts/att-1/submit`, () => {
+        submitCalled = true;
+        return HttpResponse.json({
+          data: { ...sampleAttempt, status: "submitted", grading_status: "auto_graded" },
+        });
+      }),
+    );
+
+    render(<StudentExamWorkspace attemptId="att-1" />);
+    const sqlInput = await screen.findByLabelText("Your SQL Query");
+    await user.clear(sqlInput);
+    await user.type(sqlInput, "SELECT price FROM products;");
+
+    // Immediately switch to Q2 before the 800ms debounce timer fires
+    await user.click(screen.getByRole("button", { name: /Q2/i }));
+    await user.click(await screen.findByLabelText("IS NULL"));
+
+    // Submit immediately before Q2 debounce fires
+    await user.click(screen.getByRole("button", { name: /^Submit Exam$/i }));
+    await user.click(screen.getByRole("button", { name: /^Confirm Submit$/i }));
+
+    await waitFor(() => expect(submitCalled).toBe(true));
+    expect(putOrder.some((entry) => entry.qId === "q-1" && entry.body.submitted_sql === "SELECT price FROM products;")).toBe(true);
+    expect(putOrder.some((entry) => entry.qId === "q-2" && entry.body.selected_option_ids?.[0] === "opt-1")).toBe(true);
+  });
+
+  it("aborts exam submission if flushing a dirty answer fails", async () => {
+    const user = userEvent.setup();
+    let submitCalled = false;
+
+    server.use(
+      http.get(`${API}/student/attempts/att-1`, () => HttpResponse.json({ data: sampleAttempt })),
+      http.put(`${API}/student/attempts/att-1/answers/q-1`, () =>
+        HttpResponse.json({ message: "Database temporarily unavailable." }, { status: 500 }),
+      ),
+      http.post(`${API}/student/attempts/att-1/submit`, () => {
+        submitCalled = true;
+        return HttpResponse.json({ data: sampleAttempt });
+      }),
+    );
+
+    render(<StudentExamWorkspace attemptId="att-1" />);
+    const sqlInput = await screen.findByLabelText("Your SQL Query");
+    await user.type(sqlInput, " ");
+
+    await user.click(screen.getByRole("button", { name: /^Submit Exam$/i }));
+    await user.click(screen.getByRole("button", { name: /^Confirm Submit$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/unavailable/i);
+    expect(submitCalled).toBe(false);
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 

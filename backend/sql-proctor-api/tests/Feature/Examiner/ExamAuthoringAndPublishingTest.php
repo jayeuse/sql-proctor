@@ -10,6 +10,7 @@ use App\Models\Exam;
 use App\Models\ExamAttempt;
 use App\Models\ExamQuestion;
 use App\Models\ExamVersion;
+use App\Models\QuestionTestCase;
 use App\Models\SqlDataset;
 use App\Models\StudentSession;
 use App\Models\User;
@@ -420,5 +421,108 @@ class ExamAuthoringAndPublishingTest extends TestCase
             ->postJson("/api/examiner/exams/{$examId}/archive")
             ->assertOk()
             ->assertJsonPath('data.status', 'archived');
+    }
+
+    /** PR#4 Blocking #1 & Non-Blocking High | auto/hybrid DML/DDL assertion requirement & seed error surfacing */
+    public function test_dml_and_ddl_auto_questions_require_assertion_sql_and_surface_override_seed_errors(): void
+    {
+        $examiner = User::factory()->examiner()->create();
+        $dataset = SqlDataset::factory()->for($examiner, 'owner')->create([
+            'schema_sql' => 'CREATE TABLE employees (id INT PRIMARY KEY, dept VARCHAR(40));',
+            'seed_sql' => "INSERT INTO employees VALUES (1, 'Eng');",
+        ]);
+        $exam = Exam::factory()->for($examiner, 'examiner')->for($dataset, 'dataset')->create([
+            'status' => 'draft',
+            'total_points' => 10,
+        ]);
+
+        // Auto SqlDml with 0 test cases fails validation
+        $qDml = ExamQuestion::factory()->for($exam)->create([
+            'position' => 1,
+            'question_type' => QuestionType::SqlDml,
+            'grading_mode' => 'auto',
+            'points' => 10,
+            'reference_sql' => "UPDATE employees SET dept = 'Ops' WHERE id = 1;",
+        ]);
+
+        $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/validate")
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'exam_validation_failed');
+
+        // Auto SqlDml with match_reference test case lacking assertion_sql fails validation
+        $tc = QuestionTestCase::factory()->for($qDml, 'question')->create([
+            'position' => 1,
+            'name' => 'Missing assert',
+            'weight_points' => 10,
+            'expected_behavior' => 'match_reference',
+            'assertion_sql' => null,
+        ]);
+
+        $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/validate")
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'exam_validation_failed');
+
+        // Adding assertion_sql + broken override_seed_sql surfaces real sanitized MariaDB error
+        $tc->update([
+            'assertion_sql' => 'SELECT id, dept FROM employees ORDER BY id',
+            'override_seed_sql' => 'INSERT INTO missing_seed_tbl VALUES (1);',
+        ]);
+
+        $res = $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/validate")
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'exam_validation_failed');
+
+        $this->assertStringContainsString('missing_seed_tbl', (string) $res->json('issues.0'));
+    }
+
+    /** PR#4 Blocking #5 & Non-Blocking | auto schema_summary on publish, available_until-only window, double-publish block */
+    public function test_publishing_populates_unvalidated_dataset_schema_summary_allows_until_only_window_and_blocks_republish(): void
+    {
+        $examiner = User::factory()->examiner()->create();
+        $dataset = SqlDataset::factory()->for($examiner, 'owner')->create([
+            'schema_sql' => 'CREATE TABLE inventory (sku INT PRIMARY KEY, stock INT NOT NULL);',
+            'seed_sql' => 'INSERT INTO inventory VALUES (101, 5);',
+            'schema_summary' => null,
+            'validated_at' => null,
+        ]);
+        $exam = Exam::factory()->for($examiner, 'examiner')->for($dataset, 'dataset')->create([
+            'status' => 'draft',
+            'total_points' => 10,
+        ]);
+        ExamQuestion::factory()->for($exam)->create([
+            'position' => 1,
+            'question_type' => QuestionType::SqlSelect,
+            'grading_mode' => 'auto',
+            'points' => 10,
+            'reference_sql' => 'SELECT sku, stock FROM inventory ORDER BY sku',
+        ]);
+
+        $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/publish")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'published');
+
+        $this->assertNotEmpty($dataset->fresh()->schema_summary['tables'] ?? []);
+        $version = ExamVersion::where('exam_id', $exam->id)->firstOrFail();
+        $this->assertSame('inventory', $version->snapshot['dataset']['schema_summary']['tables'][0]['name'] ?? null);
+
+        // Republish while already published returns 409 exam_locked
+        $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/publish")
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'exam_locked');
+
+        // Assign with available_until set while available_from is null succeeds (201)
+        $classroom = Classroom::factory()->for($examiner, 'examiner')->create(['is_open' => true]);
+        $this->actingAs($examiner, 'sanctum')
+            ->postJson("/api/examiner/exams/{$exam->id}/classrooms", [
+                'classroom_id' => $classroom->id,
+                'available_from' => null,
+                'available_until' => now()->addDays(2)->toIso8601ZuluString(),
+            ])
+            ->assertStatus(201);
     }
 }
