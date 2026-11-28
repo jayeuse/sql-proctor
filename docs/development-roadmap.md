@@ -38,13 +38,13 @@ Delivered under [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md) and 
 - Sanctum SPA session authentication (`/api/auth/login`, `/api/auth/logout`, `/api/user`), `last_login_at` tracking, active-user enforcement, and rate limiting.
 - Administrator endpoints and `/admin` UI for examiner CRUD, enable/disable toggles, and filterable audit logs.
 - Examiner endpoints and `/examiner` UI for classrooms, class-code generation and rotation, class status (`open`/`closed`), and student session revocation.
-- Kahoot-style student entry (`/api/student/join`, `/api/student/me`, `/api/student/leave`) on `/join` and `/student` using HTTP-only `student_session` cookies.
+- Kahoot-style student entry (`/api/student/join`, `/api/student/session`, `/api/student/leave`) on `/join` and `/student` using HTTP-only `student_session_id` cookies.
 - Append-only `audit_logs` PostgreSQL table protected by a `BEFORE UPDATE OR DELETE` trigger and centralized secret redaction.
 - Next.js 16 App Router pages styled with Tailwind CSS v4, Vitest component tests, Playwright Chromium E2E tests, and GitHub Actions CI.
 
 Exit criteria verified:
 
-1. Backend Pint formatting and 98 PostgreSQL PHPUnit feature/integration tests pass.
+1. Backend Pint formatting and 100 PostgreSQL PHPUnit feature/integration tests pass.
 2. Frontend ESLint, Next.js production build, 20 Vitest tests, and 11 Chromium Playwright E2E journeys pass.
 3. Unauthenticated and cross-role access return `401` and `403`, and `audit_logs` rejects direct `UPDATE`/`DELETE`.
 
