@@ -22,6 +22,20 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mariadb:
+        image: mariadb:11.8.9
+        env:
+          MARIADB_DATABASE: sql_exec
+          MARIADB_USER: sql_runner
+          MARIADB_PASSWORD: ci-mariadb-runner-password
+          MARIADB_ROOT_PASSWORD: ci-mariadb-root-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend/sql-proctor-api
@@ -33,7 +47,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          extensions: mbstring, mysqli, pdo, pdo_mysql, pdo_pgsql, pgsql
           tools: composer:v2
 
       - name: Cache Composer packages
@@ -51,6 +65,19 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
+      - name: Initialize MariaDB sandbox accounts
+        run: |
+          php -r '
+          $pdo = new PDO("mysql:host=127.0.0.1;port=3306;charset=utf8mb4", "root", "ci-mariadb-root-password", [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          $pdo->exec("CREATE USER IF NOT EXISTS '\''sql_provisioner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-provisioner-password'\''");
+          $pdo->exec("ALTER USER '\''sql_provisioner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-provisioner-password'\''");
+          $pdo->exec("REVOKE ALL PRIVILEGES, GRANT OPTION FROM '\''sql_provisioner'\''@'\''%'\''");
+          $pdo->exec("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE VIEW, SHOW VIEW, TRIGGER ON `sbx_%`.* TO '\''sql_provisioner'\''@'\''%'\'' WITH GRANT OPTION");
+          $pdo->exec("ALTER USER '\''sql_runner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-runner-password'\'' WITH MAX_USER_CONNECTIONS 30 MAX_STATEMENT_TIME 5");
+          $pdo->exec("REVOKE ALL PRIVILEGES, GRANT OPTION FROM '\''sql_runner'\''@'\''%'\''");
+          $pdo->exec("FLUSH PRIVILEGES");
+          '
+
       - name: Check formatting with Pint
         run: vendor/bin/pint --test
 
@@ -62,6 +89,13 @@ jobs:
           DB_DATABASE: sql_proctor_test
           DB_USERNAME: sql_proctor
           DB_PASSWORD: ci-postgres-password
+          MARIADB_HOST: 127.0.0.1
+          MARIADB_PORT: 3306
+          MARIADB_DATABASE: ''
+          MARIADB_PROVISIONER_USERNAME: sql_provisioner
+          MARIADB_PROVISIONER_PASSWORD: ci-mariadb-provisioner-password
+          MARIADB_RUNNER_USERNAME: sql_runner
+          MARIADB_RUNNER_PASSWORD: ci-mariadb-runner-password
         run: php artisan test
 
   frontend:
@@ -108,6 +142,20 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mariadb:
+        image: mariadb:11.8.9
+        env:
+          MARIADB_DATABASE: sql_exec
+          MARIADB_USER: sql_runner
+          MARIADB_PASSWORD: ci-mariadb-runner-password
+          MARIADB_ROOT_PASSWORD: ci-mariadb-root-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DB_CONNECTION: pgsql
       DB_HOST: 127.0.0.1
@@ -115,6 +163,13 @@ jobs:
       DB_DATABASE: sql_proctor_test
       DB_USERNAME: sql_proctor
       DB_PASSWORD: ci-postgres-password
+      MARIADB_HOST: 127.0.0.1
+      MARIADB_PORT: 3306
+      MARIADB_DATABASE: ''
+      MARIADB_PROVISIONER_USERNAME: sql_provisioner
+      MARIADB_PROVISIONER_PASSWORD: ci-mariadb-provisioner-password
+      MARIADB_RUNNER_USERNAME: sql_runner
+      MARIADB_RUNNER_PASSWORD: ci-mariadb-runner-password
 
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +178,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          extensions: mbstring, mysqli, pdo, pdo_mysql, pdo_pgsql, pgsql
           tools: composer:v2
 
       - name: Cache Composer packages
@@ -142,6 +197,19 @@ jobs:
         run: |
           cp .env.example .env
           php artisan key:generate
+
+      - name: Initialize MariaDB sandbox accounts
+        run: |
+          php -r '
+          $pdo = new PDO("mysql:host=127.0.0.1;port=3306;charset=utf8mb4", "root", "ci-mariadb-root-password", [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          $pdo->exec("CREATE USER IF NOT EXISTS '\''sql_provisioner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-provisioner-password'\''");
+          $pdo->exec("ALTER USER '\''sql_provisioner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-provisioner-password'\''");
+          $pdo->exec("REVOKE ALL PRIVILEGES, GRANT OPTION FROM '\''sql_provisioner'\''@'\''%'\''");
+          $pdo->exec("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE VIEW, SHOW VIEW, TRIGGER ON `sbx_%`.* TO '\''sql_provisioner'\''@'\''%'\'' WITH GRANT OPTION");
+          $pdo->exec("ALTER USER '\''sql_runner'\''@'\''%'\'' IDENTIFIED BY '\''ci-mariadb-runner-password'\'' WITH MAX_USER_CONNECTIONS 30 MAX_STATEMENT_TIME 5");
+          $pdo->exec("REVOKE ALL PRIVILEGES, GRANT OPTION FROM '\''sql_runner'\''@'\''%'\''");
+          $pdo->exec("FLUSH PRIVILEGES");
+          '
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
