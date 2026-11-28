@@ -70,6 +70,7 @@ describe("StudentSessionView", () => {
           },
         }),
       ),
+      http.get(`${API}/student/exams`, () => HttpResponse.json({ data: [] })),
       http.post(`${API}/student/leave`, () => HttpResponse.json({ message: "Left class." })),
     );
 
@@ -80,5 +81,43 @@ describe("StudentSessionView", () => {
 
     await user.click(screen.getByRole("button", { name: "Leave Class" }));
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"));
+  });
+
+  it("lists assigned exams and starts an exam attempt into /student/exams/[attemptId]", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API}/student/session`, () =>
+        HttpResponse.json({
+          data: {
+            id: "sess-1",
+            display_name: "Ada Lovelace",
+            expires_at: "2026-11-28T12:00:00Z",
+            classroom: { id: "class-1", name: "SQL Practical 1", join_code: "JOIN2345", is_open: true },
+          },
+        }),
+      ),
+      http.get(`${API}/student/exams`, () =>
+        HttpResponse.json({
+          data: [
+            {
+              id: "ce-1",
+              title: "Midterm SQL Practical",
+              duration_minutes: 45,
+              question_count: 3,
+              total_points: "30.00",
+              attempt: null,
+            },
+          ],
+        }),
+      ),
+      http.post(`${API}/student/exams/ce-1/start`, () =>
+        HttpResponse.json({ data: { id: "att-new" } }, { status: 201 }),
+      ),
+    );
+
+    render(<StudentSessionView />);
+    expect(await screen.findByText("Midterm SQL Practical")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Start Exam/i }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/student/exams/att-new"));
   });
 });
