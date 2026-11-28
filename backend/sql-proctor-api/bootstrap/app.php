@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\ApiException;
+use App\Exceptions\SandboxUnavailableException;
 use App\Http\Middleware\AssignRequestId;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\EnsureUserIsActive;
@@ -53,6 +54,14 @@ return Application::configure(basePath: dirname(__DIR__))
                 AssignRequestId::resolve($request),
             );
 
+            if ($e instanceof SandboxUnavailableException) {
+                return $withRequestId(ApiResponse::error(
+                    $e->getMessage(),
+                    503,
+                    'execution_engine_unavailable',
+                ));
+            }
+
             if ($e instanceof ApiException) {
                 $status = $e->getStatusCode();
 
@@ -64,12 +73,15 @@ return Application::configure(basePath: dirname(__DIR__))
                     ));
                 }
 
-                return $withRequestId(ApiResponse::error(
-                    $e->getMessage(),
-                    $status,
-                    $e->errorCode(),
-                    $e->getHeaders(),
-                ));
+                $payload = ['message' => $e->getMessage()];
+                if ($e->errorCode() !== null) {
+                    $payload['code'] = $e->errorCode();
+                }
+                if ($e->extra() !== []) {
+                    $payload = array_merge($payload, $e->extra());
+                }
+
+                return $withRequestId(response()->json($payload, $status, $e->getHeaders()));
             }
 
             if ($e instanceof ValidationException) {
