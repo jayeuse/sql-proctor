@@ -13,6 +13,8 @@ export default function StudentSessionView() {
     routerRef.current = router;
   }, [router]);
   const [session, setSession] = useState(null);
+  const [assignedExams, setAssignedExams] = useState([]);
+  const [startingExamId, setStartingExamId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState(null);
@@ -25,7 +27,21 @@ export default function StudentSessionView() {
       try {
         const res = await api.get("/student/session");
         if (!active) return;
-        setSession(res.data?.data ?? null);
+        const sessionData = res.data?.data ?? null;
+        setSession(sessionData);
+
+        if (sessionData) {
+          try {
+            const examsRes = await api.get("/student/exams");
+            if (active) {
+              setAssignedExams(examsRes.data?.data ?? []);
+            }
+          } catch (examsErr) {
+            if (active && examsErr?.response?.status === 401) {
+              routerRef.current.push("/");
+            }
+          }
+        }
       } catch (err) {
         if (!active) return;
         const status = err?.response?.status;
@@ -48,6 +64,28 @@ export default function StudentSessionView() {
       active = false;
     };
   }, []);
+
+  async function handleStartExam(classroomExamId) {
+    setError(null);
+    setStartingExamId(classroomExamId);
+    try {
+      await ensureCsrfCookie();
+      const res = await api.post(`/student/exams/${classroomExamId}/start`);
+      const attempt = res.data?.data;
+      if (attempt?.id) {
+        router.push(`/student/exams/${attempt.id}`);
+      }
+    } catch (err) {
+      const parsed = extractApiError(err, "Could not start exam.");
+      if (parsed.status === 401) {
+        router.push("/");
+        return;
+      }
+      setError(parsed.message);
+    } finally {
+      setStartingExamId(null);
+    }
+  }
 
   async function handleLeave() {
     setLeaving(true);
@@ -131,6 +169,66 @@ export default function StudentSessionView() {
                 <dd className="font-mono text-xs text-slate-700">{session.expires_at}</dd>
               </div>
             </dl>
+
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <h2 className="text-sm font-semibold text-slate-900">Assigned SQL Exams</h2>
+              {assignedExams.length === 0 ? (
+                <p className="text-xs text-slate-600">
+                  No active exams are currently assigned to this classroom.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {assignedExams.map((exam) => {
+                    const attempt = exam.attempt;
+                    return (
+                      <li
+                        key={exam.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900">{exam.title}</p>
+                          <p className="text-xs text-slate-600">
+                            {exam.duration_minutes} min · {exam.question_count} questions · {exam.total_points} pts
+                          </p>
+                          {attempt?.released ? (
+                            <p className="mt-1 font-mono text-xs text-emerald-700">
+                              Score: {attempt.final_score} / {attempt.max_score} (
+                              {attempt.passed ? "Passed" : "Not Passed"})
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0">
+                          {!attempt ? (
+                            <button
+                              type="button"
+                              disabled={startingExamId === exam.id}
+                              onClick={() => handleStartExam(exam.id)}
+                              className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              {startingExamId === exam.id ? "Starting..." : "Start Exam"}
+                            </button>
+                          ) : attempt.status === "in_progress" ? (
+                            <Link
+                              href={`/student/exams/${attempt.id}`}
+                              className="inline-block rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                              Resume Exam
+                            </Link>
+                          ) : (
+                            <Link
+                              href={`/student/exams/${attempt.id}/result`}
+                              className="inline-block rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              View Result
+                            </Link>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
 
             <button
               type="button"

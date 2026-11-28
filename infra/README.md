@@ -7,7 +7,7 @@ This directory holds the local development infrastructure for SQL-Proctor. It co
 | Service | Role | Image | Host address |
 |---|---|---|---|
 | `postgres` | The application database. Only the Laravel API reads and writes it. | `postgres:17.12-trixie` | `127.0.0.1:5432` |
-| `mariadb` | The student-query execution engine. It is **never** the application database. | `mariadb:11.8.9` | `127.0.0.1:3306` |
+| `mariadb` | The student-query execution engine (ephemeral `sbx_<32-hex>` sandboxes). It is **never** the application database. | `mariadb:11.8.9` | `127.0.0.1:3306` (or `3307` via `MARIADB_PORT` if XAMPP holds `3306`) |
 
 Both services bind to the loopback address only. They do not accept connections from the local network.
 
@@ -86,4 +86,7 @@ docker compose exec -T mariadb healthcheck.sh --connect --innodb_initialized
 
 - Image tags are pinned. Change a tag only with a separate review.
 - This stack adds no Redis, queue, or mail service. Add a service only when a later task requires it and the Human Owner authorizes it.
-- Do not add initialization scripts under `infra/docker/` yet. The current databases start empty by design.
+- `./mariadb-init/01-sandbox-accounts.sh` provisions two strictly separated MariaDB accounts:
+  - `sql_provisioner` (`mariadb_provisioner`): scoped to `sbx_%.*` with schema DDL/DML + `GRANT OPTION` for managing ephemeral sandboxes (`mysql.*`, `sys.*`, `performance_schema.*`, and global `*.*` inaccessible).
+  - `sql_runner` (`mariadb_runner`): hardened to `USAGE ON *.* WITH MAX_USER_CONNECTIONS 30 MAX_STATEMENT_TIME 5` with zero baseline database grants; receives temporary per-sandbox privileges only while executing a query inside its assigned `sbx_<32-hex>` database.
+- If the MariaDB volume already existed before `01-sandbox-accounts.sh` was added, re-run the idempotent account script directly inside the container: `docker compose exec -T mariadb sh /docker-entrypoint-initdb.d/01-sandbox-accounts.sh`.

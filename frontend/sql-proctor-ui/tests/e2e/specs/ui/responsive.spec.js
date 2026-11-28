@@ -27,13 +27,20 @@ test.describe("Mobile viewport (375x812) responsive layout verification", () => 
   test.describe("examiner mobile", () => {
     test.use({ role: "examiner" });
 
-    test("examiner console fits phone viewport without page overflow", async ({ authedPage: page }) => {
+    test("examiner console, datasets, and exams fit phone viewport without page overflow", async ({
+      authedPage: page,
+    }) => {
       await page.goto("/examiner");
       await expect(page.getByRole("heading", { name: "Examiner console" })).toBeVisible();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth > window.innerWidth,
-      );
-      expect(overflow, "Horizontal overflow on /examiner at 375px").toBe(false);
+
+      for (const route of ["/examiner", "/examiner/datasets", "/examiner/exams"]) {
+        await page.goto(route);
+        await page.waitForLoadState("networkidle");
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        );
+        expect(overflow, `Horizontal overflow on ${route} at 375px`).toBe(false);
+      }
     });
   });
 });

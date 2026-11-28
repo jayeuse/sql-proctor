@@ -56,6 +56,22 @@ class User extends Authenticatable
         return $this->hasMany(Classroom::class, 'examiner_id');
     }
 
+    /**
+     * @return HasMany<SqlDataset, $this>
+     */
+    public function datasets(): HasMany
+    {
+        return $this->hasMany(SqlDataset::class, 'owner_id');
+    }
+
+    /**
+     * @return HasMany<Exam, $this>
+     */
+    public function exams(): HasMany
+    {
+        return $this->hasMany(Exam::class, 'examiner_id');
+    }
+
     public function isAdmin(): bool
     {
         return $this->role === UserRole::Admin;

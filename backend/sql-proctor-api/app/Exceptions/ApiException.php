@@ -10,12 +10,16 @@ use Throwable;
  */
 class ApiException extends HttpException
 {
+    /**
+     * @param  array<string, mixed>  $extra
+     */
     public function __construct(
         int $statusCode,
         string $message,
         private readonly ?string $errorCode = null,
         array $headers = [],
         ?Throwable $previous = null,
+        private readonly array $extra = [],
     ) {
         parent::__construct($statusCode, $message, $previous, $headers);
     }
@@ -23,6 +27,14 @@ class ApiException extends HttpException
     public function errorCode(): ?string
     {
         return $this->errorCode;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function extra(): array
+    {
+        return $this->extra;
     }
 
     public static function forbidden(string $message, ?string $errorCode = null, array $headers = []): self
@@ -48,5 +60,13 @@ class ApiException extends HttpException
     public static function tooManyRequests(string $message, string $errorCode = 'too_many_attempts', array $headers = []): self
     {
         return new self(429, $message, $errorCode, $headers);
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    public static function unprocessable(string $message, string $errorCode, array $extra = []): self
+    {
+        return new self(422, $message, $errorCode, [], null, $extra);
     }
 }

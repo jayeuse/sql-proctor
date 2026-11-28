@@ -1,6 +1,6 @@
 # SQL-Proctor Development Roadmap
 
-> Status: Phase 0 is verified except the MariaDB host port check. Phase 1 is complete and verified against [SPEC-0004](specs/SPEC-0004-auth-rbac-and-audit-logging.md). Phases 2 through 5 are `Proposed` and await Human Owner approval.
+> Status: Phases 0 through 4 (`SPEC-0004`, `SPEC-0005`, `ADR-0002`, `ADR-0003`) are complete and verified (2026-11-28). Phase 5 remains `Proposed`.
 
 The Human Owner defined the product as a web-based SQL practical examination system and fixed the stack. This roadmap gives the order of work. It does not authorize any unapproved phase.
 
@@ -23,8 +23,8 @@ Exit criteria:
 1. `php artisan serve` answers `200` on `/up`. Verified.
 2. `npm run dev` answers `200` on `http://localhost:3000`. Verified.
 3. PostgreSQL is healthy and Laravel migrations are applied. Verified.
-4. MariaDB is healthy and answers a query. `NOT RUN`: XAMPP MySQL holds port 3306. Configured and waiting for the port.
-5. Every documented Compose command runs as written. PostgreSQL commands verified. The `up`, `start`, and MariaDB checks are `NOT RUN` until port 3306 is free.
+4. MariaDB is healthy and answers a query. Verified on `127.0.0.1:3307` (`MARIADB_PORT=3307` in `infra/.env` while local XAMPP MySQL keeps port `3306`; `11.8.9-MariaDB-ubu2404`).
+5. Every documented Compose command runs as written. Verified.
 
 ## Phase 1: Accounts and authentication
 
@@ -50,41 +50,26 @@ Exit criteria verified:
 
 ## Phase 2: Exam authoring
 
-**Status: Proposed.**
+**Status: Complete and verified (2026-11-28, [SPEC-0005](specs/SPEC-0005-exam-authoring-and-student-examination.md)).**
 
-Outcome: an examiner can create an exam with SQL tasks and expected results, then publish it.
-
-Scope to define: question types (single statement, result set, schema modification), per-question points, expected-result comparison rules, and draft versus published states. These are `TBD`.
-
-Exit criteria to define: create, edit, publish, and unpublish an exam; validation errors are visible; a published exam is immutable for students.
-
-Not started. Needs accepted criteria and a feature task.
+Outcome: an examiner can create reusable datasets, build exams across 6 question types (`sql_select`, `sql_dml`, `sql_ddl`, `sql_debug`, `short_answer`, `mcq`) with weighted test cases and rubrics, validate against live MariaDB, publish immutable `exam_versions`, and assign exams to classrooms.
 
 ## Phase 3: Student attempts and SQL execution
 
-**Status: Proposed. The highest-risk phase.**
+**Status: Complete and verified (2026-11-28, [SPEC-0005](specs/SPEC-0005-exam-authoring-and-student-examination.md), [ADR-0003](adr/0003-mariadb-sql-execution-isolation-and-exam-versioning.md)).**
 
-Outcome: a student starts an attempt, writes SQL in the Monaco editor, runs it against MariaDB, and sees a bounded result.
-
-Scope to define: the isolation model (schema per attempt, database per attempt, or a restricted server), the execution user's privileges, seed data, cleanup, time limit, row limit, and statement limit. These are `TBD`.
-
-Design rule: MariaDB never receives application data or application credentials. PostgreSQL remains the application database.
-
-Exit criteria to define: one attempt cannot see another attempt's data or the application database; a runaway query is stopped; the attempt survives a page reload.
-
-Not started. Needs a technical design and the Human Owner's approval of the isolation model.
+Outcome: a student starts an attempt pinned to an immutable `exam_versions` snapshot, writes SQL in Monaco Editor, executes queries against an ephemeral `sbx_<32-hex>` MariaDB 11.8.9 schema under least-privilege `sql_runner`, auto-saves answers, and submits under server-authoritative timers.
 
 ## Phase 4: Grading and results
 
-**Status: Proposed.**
+**Status: Complete and verified (2026-11-28, [SPEC-0005](specs/SPEC-0005-exam-authoring-and-student-examination.md)).**
 
-Outcome: a submitted attempt is graded against the expected results, and the examiner and student see the outcome.
+Outcome: submitted attempts are graded via outcome-based SQL result comparison (`ResultSetComparator`), weighted partial credit, MCQ checks, manual/hybrid rubrics, audited score overrides, and controlled result release.
 
-Scope to define: automatic comparison rules, partial credit, manual review, score visibility, and appeal or regrade behavior. These are `TBD`.
+Exit criteria verified across Phases 2–4:
 
-Exit criteria to define: a known set of answers produces the expected scores; a regrade is auditable.
-
-Not started.
+1. Pint clean and 135/135 PHPUnit tests (`1151` assertions) pass against PostgreSQL `sql_proctor_test` and live MariaDB 11.8.9, with zero leaked `sbx_*` schemas or runner grants.
+2. Frontend `npm audit` reports `0` vulnerabilities; Vitest (`12` files, `42` tests), ESLint, Next.js build (`16` routes), and Playwright Chromium E2E (`12/12` across `1280x800` desktop and `375x812` phone) pass.
 
 ## Phase 5: Hardening and operations
 
@@ -108,8 +93,8 @@ Not started.
 
 ## Known gaps
 
-- MariaDB host port 3306 conflicts with XAMPP MySQL when XAMPP MySQL runs. Stop XAMPP MySQL or set `MARIADB_PORT` before Phase 3 verification.
-- Two low-severity `dompurify` advisories (`<=3.4.16`) arrive through `monaco-editor`. Monaco is installed and unused until Phase 3; review before exam execution starts.
+- MariaDB host port 3306 conflicts with XAMPP MySQL when XAMPP MySQL runs. Local `infra/.env` and `backend/sql-proctor-api/.env` use `MARIADB_PORT=3307`; CI uses default `3306`.
+- `dompurify` advisories (`<=3.4.16`) via `monaco-editor` were resolved on 2026-11-28 via `npm audit fix` (`monaco-editor` `0.58.0`, `dompurify` `3.4.17`, `0` vulnerabilities in `npm audit`).
 - Five pre-existing Symfony advisories appear in `composer audit` (observed 2026-11-25).
 - Frontend tests (`Vitest`, `React Testing Library`, `Playwright`) and GitHub Actions CI (`.github/workflows/ci.yml`) were added in Phase 1.
 - The Laravel skeleton's `backend/sql-proctor-api/AGENTS.md` asks agents to install Laravel Boost, which stays outside the approved setup.

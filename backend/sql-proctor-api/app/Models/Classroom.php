@@ -44,6 +44,14 @@ class Classroom extends Model
     }
 
     /**
+     * @return HasMany<ClassroomExam, $this>
+     */
+    public function classroomExams(): HasMany
+    {
+        return $this->hasMany(ClassroomExam::class, 'classroom_id');
+    }
+
+    /**
      * @return HasMany<StudentSession, $this>
      */
     public function activeStudentSessions(): HasMany

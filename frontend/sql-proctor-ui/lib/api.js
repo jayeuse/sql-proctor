@@ -65,4 +65,5 @@ export function extractApiError(error, fallback = "An unexpected error occurred.
   };
 }
 
+export { api };
 export default api;

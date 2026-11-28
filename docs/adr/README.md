@@ -24,3 +24,4 @@ This folder holds the architecture decisions that later work must follow. Each d
 |---|---|---|---|
 | [ADR-0001](0001-agent-skills-in-dot-agents.md) | Agent skills use the discovery-first `.agents/skills` layout | Accepted | 2026-11-19 |
 | [ADR-0002](0002-auth-session-boundaries-and-audit-isolation.md) | Dual Session Authentication Boundaries and Append-Only PostgreSQL Audit Logging | Accepted | 2026-11-28 |
+| [ADR-0003](0003-mariadb-sql-execution-isolation-and-exam-versioning.md) | Ephemeral MariaDB Schema Isolation, Immutable Exam Versioning, and Classroom Decoupling | Accepted | 2026-11-28 |
